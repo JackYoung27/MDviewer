@@ -52,11 +52,10 @@ MDviewer is different:
 
 1. Grab `MDviewer.app.zip` from [Releases](https://github.com/JackYoung27/mdviewer/releases/latest)
 2. Unzip, drag to `/Applications`
-3. Clear the quarantine flag (macOS blocks unsigned downloaded apps):
-   ```bash
-   xattr -cr /Applications/Markdown\ Viewer.app
-   ```
-4. Double-click to open as normal
+3. On first launch, macOS will block the app because it's unsigned. To open it:
+   - **Right-click** (or Control-click) the app → click **Open** → click **Open** again in the dialog
+   - Or run in Terminal: `xattr -cr /Applications/Markdown\ Viewer.app`
+4. After the first open, it launches normally like any other app
 
 ### Build from source
 
