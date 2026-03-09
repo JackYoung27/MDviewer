@@ -92,6 +92,7 @@ build_native_binary() {
         -Wno-unused-parameter \
         -isysroot "$sdk_path" \
         -framework Cocoa \
+        -framework CoreServices \
         -framework UniformTypeIdentifiers \
         -framework WebKit \
         "$SRC_DIR/main.m" \

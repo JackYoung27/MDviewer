@@ -1,4 +1,5 @@
 #import <Cocoa/Cocoa.h>
+#import <CoreServices/CoreServices.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 #import <WebKit/WebKit.h>
 
@@ -24,6 +25,7 @@ static NSError *MDVMakeError(NSInteger code, NSString *description) {
 @property(nonatomic, strong) NSURL *previewFileURL;
 @property(nonatomic, strong) NSURL *lastExportedPDFURL;
 @property(nonatomic, assign, getter=isPreviewReady) BOOL previewReady;
+@property(nonatomic, assign) FSEventStreamRef fileWatchStream;
 
 - (BOOL)openMarkdownFileURL:(NSURL *)fileURL error:(NSError **)error;
 - (void)reloadPreview:(id)sender;
@@ -176,6 +178,7 @@ static NSError *MDVMakeError(NSInteger code, NSString *description) {
     [[NSDocumentController sharedDocumentController] noteNewRecentDocumentURL:standardURL];
 
     [self.webView loadFileURL:previewURL allowingReadAccessToURL:[NSURL fileURLWithPath:@"/"]];
+    [self startWatchingSourceFile];
 
     return YES;
 }
@@ -305,7 +308,66 @@ static NSError *MDVMakeError(NSInteger code, NSString *description) {
     [[NSWorkspace sharedWorkspace] activateFileViewerSelectingURLs:@[self.sourceFileURL]];
 }
 
+static void MDVFSEventCallback(ConstFSEventStreamRef streamRef,
+                               void *clientCallBackInfo,
+                               size_t numEvents,
+                               void *eventPaths,
+                               const FSEventStreamEventFlags eventFlags[],
+                               const FSEventStreamEventId eventIds[]) {
+    MDVPreviewWindowController *controller = (__bridge MDVPreviewWindowController *)clientCallBackInfo;
+    NSString *watchedName = controller.sourceFileURL.lastPathComponent;
+    NSArray<NSString *> *paths = (__bridge NSArray *)eventPaths;
+
+    for (NSUInteger i = 0; i < numEvents; i++) {
+        NSString *changedName = paths[i].lastPathComponent;
+        if ([changedName isEqualToString:watchedName]) {
+            [controller reloadPreview:nil];
+            return;
+        }
+    }
+}
+
+- (void)startWatchingSourceFile {
+    [self stopWatchingSourceFile];
+
+    if (!self.sourceFileURL) {
+        return;
+    }
+
+    NSString *directoryPath = self.sourceFileURL.URLByDeletingLastPathComponent.path;
+    NSArray *pathsToWatch = @[directoryPath];
+
+    FSEventStreamContext context = {0, (__bridge void *)self, NULL, NULL, NULL};
+
+    FSEventStreamRef stream = FSEventStreamCreate(
+        NULL,
+        &MDVFSEventCallback,
+        &context,
+        (__bridge CFArrayRef)pathsToWatch,
+        kFSEventStreamEventIdSinceNow,
+        0.3,
+        kFSEventStreamCreateFlagFileEvents | kFSEventStreamCreateFlagUseCFTypes);
+
+    if (!stream) {
+        return;
+    }
+
+    FSEventStreamSetDispatchQueue(stream, dispatch_get_main_queue());
+    FSEventStreamStart(stream);
+    self.fileWatchStream = stream;
+}
+
+- (void)stopWatchingSourceFile {
+    if (self.fileWatchStream) {
+        FSEventStreamStop(self.fileWatchStream);
+        FSEventStreamInvalidate(self.fileWatchStream);
+        FSEventStreamRelease(self.fileWatchStream);
+        self.fileWatchStream = NULL;
+    }
+}
+
 - (void)windowWillClose:(NSNotification *)notification {
+    [self stopWatchingSourceFile];
     if (self.closeHandler) {
         self.closeHandler();
     }

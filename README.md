@@ -39,7 +39,7 @@ Most Markdown preview options are either heavyweight editors (Obsidian, Typora),
 - **GitHub Flavored Markdown** — tables, task lists, fenced code blocks, line breaks
 - **Default handler registration** — install once, and `.md` files open in MDviewer from Finder
 - **Tabbed windows** — open multiple documents in a single window
-- **Reload** — `Cmd+R` re-renders after you edit the source file
+- **Live reload** — automatically re-renders when the source file changes on disk
 - **Local-first** — no network calls, no telemetry, no accounts
 
 ## Install
@@ -72,7 +72,7 @@ The built app is at `dist/Markdown Viewer.app`. To install to `/Applications` an
 | Action | Shortcut |
 |---|---|
 | Open file | `Cmd+O` |
-| Reload preview | `Cmd+R` |
+| Reload preview | `Cmd+R` (also auto-reloads on file change) |
 | Print | `Cmd+P` |
 | Export as PDF | `Cmd+Shift+E` |
 | Close window | `Cmd+W` |
