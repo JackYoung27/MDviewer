@@ -260,8 +260,7 @@
 
   function closeFindBar() {
     if (!searchState.panelEl) return;
-    searchState.panelEl.hidden = true;
-    document.body.classList.remove("find-open");
+    searchState.panelEl.classList.remove("find-panel--visible");
     searchState.query = "";
     if (searchState.inputEl) {
       searchState.inputEl.value = "";
@@ -271,17 +270,25 @@
 
   function openFindBar() {
     if (!searchState.panelEl) return;
-    searchState.panelEl.hidden = false;
-    document.body.classList.add("find-open");
+    searchState.panelEl.classList.add("find-panel--visible");
     searchState.inputEl.focus();
     searchState.inputEl.select();
     updateSearch(searchState.inputEl.value, { scrollToMatch: false });
   }
 
+  function toggleFindBar() {
+    if (!searchState.panelEl) return;
+
+    if (searchState.panelEl.classList.contains("find-panel--visible")) {
+      closeFindBar();
+    } else {
+      openFindBar();
+    }
+  }
+
   function createSearchPanel() {
     const panel = document.createElement("section");
     panel.className = "find-panel";
-    panel.hidden = true;
     panel.setAttribute("role", "search");
     panel.setAttribute("aria-label", "Find in document");
 
@@ -464,6 +471,7 @@
   }
 
   window.mdvOpenFindBar = openFindBar;
+  window.mdvToggleFindBar = toggleFindBar;
   window.mdvFindNextMatch = () => jumpToSearchMatch(1);
   window.mdvFindPreviousMatch = () => jumpToSearchMatch(-1);
   window.mdvCloseFindBar = closeFindBar;

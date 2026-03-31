@@ -787,7 +787,7 @@ decisionHandler:(void (^)(WKNavigationActionPolicy))decisionHandler {
 }
 
 - (void)openFindPanel:(id)sender {
-    [self runPreviewJavaScript:@"if (typeof mdvOpenFindBar === 'function') { mdvOpenFindBar(); }"];
+    [self runPreviewJavaScript:@"if (typeof mdvToggleFindBar === 'function') { mdvToggleFindBar(); } else if (typeof mdvOpenFindBar === 'function') { mdvOpenFindBar(); }"];
 }
 
 - (void)findNextMatch:(id)sender {

@@ -9,9 +9,9 @@
     <key>CFBundleIdentifier</key>
     <string>com.local.markdown-viewer</string>
     <key>CFBundleVersion</key>
-    <string>2.4.0</string>
+    <string>2.4.1</string>
     <key>CFBundleShortVersionString</key>
-    <string>2.4.0</string>
+    <string>2.4.1</string>
     <key>CFBundleExecutable</key>
     <string>MarkdownViewer</string>
     <key>CFBundleIconFile</key>

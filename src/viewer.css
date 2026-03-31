@@ -286,7 +286,7 @@ body {
   position: fixed;
   top: 14px;
   right: 56px;
-  display: flex;
+  display: none;
   align-items: center;
   gap: 8px;
   padding: 8px;
@@ -296,6 +296,10 @@ body {
   box-shadow: var(--find-panel-shadow);
   backdrop-filter: blur(18px);
   z-index: 1100;
+}
+
+.find-panel.find-panel--visible {
+  display: flex;
 }
 
 .find-panel__input {
