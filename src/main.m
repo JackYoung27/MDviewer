@@ -35,6 +35,9 @@ static NSError *MDVMakeError(NSInteger code, NSString *description) {
 @property(nonatomic, strong) NSURL *lastExportedPDFURL;
 @property(nonatomic, assign, getter=isPreviewReady) BOOL previewReady;
 @property(nonatomic, assign) FSEventStreamRef fileWatchStream;
+@property(nonatomic, assign) CGFloat pendingScrollTop;
+@property(nonatomic, assign) CGFloat pendingScrollRatio;
+@property(nonatomic, assign) BOOL hasPendingScrollRestore;
 
 - (BOOL)openMarkdownFileURL:(NSURL *)fileURL error:(NSError **)error;
 - (void)reloadPreview:(id)sender;
@@ -84,6 +87,12 @@ static NSError *MDVMakeError(NSInteger code, NSString *description) {
 
 - (BOOL)hasLoadedDocument {
     return self.sourceFileURL != nil;
+}
+
+- (void)clearPendingScrollRestore {
+    self.pendingScrollTop = 0.0;
+    self.pendingScrollRatio = 0.0;
+    self.hasPendingScrollRestore = NO;
 }
 
 - (NSURL *)rendererScriptURL {
@@ -202,10 +211,56 @@ static NSError *MDVMakeError(NSInteger code, NSString *description) {
         return;
     }
 
-    NSError *error = nil;
-    if (![self openMarkdownFileURL:self.sourceFileURL error:&error]) {
-        [self presentError:error];
+    if (!self.isPreviewReady) {
+        NSError *error = nil;
+        if (![self openMarkdownFileURL:self.sourceFileURL error:&error]) {
+            [self presentError:error];
+        }
+        return;
     }
+
+    __weak typeof(self) weakSelf = self;
+    NSString *captureScript =
+        @"(() => {"
+         "  const doc = document.documentElement;"
+         "  const body = document.body;"
+         "  const viewportHeight = window.innerHeight || doc.clientHeight || 0;"
+         "  const scrollHeight = Math.max(doc.scrollHeight || 0, body.scrollHeight || 0);"
+         "  const maxScroll = Math.max(scrollHeight - viewportHeight, 0);"
+         "  const scrollTop = Math.max(window.scrollY || window.pageYOffset || doc.scrollTop || body.scrollTop || 0, 0);"
+         "  const scrollRatio = maxScroll > 0 ? scrollTop / maxScroll : 0;"
+         "  return { scrollTop, scrollRatio };"
+         "})()";
+
+    [self.webView evaluateJavaScript:captureScript completionHandler:^(id result, NSError *scriptError) {
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf) {
+            return;
+        }
+
+        [strongSelf clearPendingScrollRestore];
+
+        if (!scriptError && [result isKindOfClass:NSDictionary.class]) {
+            NSDictionary *scrollState = (NSDictionary *)result;
+            NSNumber *scrollTop = scrollState[@"scrollTop"];
+            NSNumber *scrollRatio = scrollState[@"scrollRatio"];
+
+            if ([scrollTop isKindOfClass:NSNumber.class]) {
+                strongSelf.pendingScrollTop = scrollTop.doubleValue;
+                strongSelf.hasPendingScrollRestore = YES;
+            }
+
+            if ([scrollRatio isKindOfClass:NSNumber.class]) {
+                strongSelf.pendingScrollRatio = scrollRatio.doubleValue;
+            }
+        }
+
+        NSError *error = nil;
+        if (![strongSelf openMarkdownFileURL:strongSelf.sourceFileURL error:&error]) {
+            [strongSelf clearPendingScrollRestore];
+            [strongSelf presentError:error];
+        }
+    }];
 }
 
 - (void)printDocument:(id)sender {
@@ -382,6 +437,7 @@ static void MDVFSEventCallback(ConstFSEventStreamRef streamRef,
 
 - (void)windowWillClose:(NSNotification *)notification {
     [self stopWatchingSourceFile];
+    [self clearPendingScrollRestore];
     if (self.closeHandler) {
         self.closeHandler();
     }
@@ -389,6 +445,39 @@ static void MDVFSEventCallback(ConstFSEventStreamRef streamRef,
 
 - (void)webView:(WKWebView *)webView didFinishNavigation:(WKNavigation *)navigation {
     self.previewReady = YES;
+
+    if (!self.hasPendingScrollRestore) {
+        return;
+    }
+
+    CGFloat scrollTop = self.pendingScrollTop;
+    CGFloat scrollRatio = self.pendingScrollRatio;
+    [self clearPendingScrollRestore];
+
+    NSString *restoreScript = [NSString stringWithFormat:
+        @"(() => {"
+         "  const requestedTop = %@;"
+         "  const requestedRatio = %@;"
+         "  const restore = () => {"
+         "    const doc = document.documentElement;"
+         "    const body = document.body;"
+         "    const viewportHeight = window.innerHeight || doc.clientHeight || 0;"
+         "    const scrollHeight = Math.max(doc.scrollHeight || 0, body.scrollHeight || 0);"
+         "    const maxScroll = Math.max(scrollHeight - viewportHeight, 0);"
+         "    let target = Math.min(Math.max(requestedTop, 0), maxScroll);"
+         "    if (requestedRatio >= 0.98 && maxScroll > 0) {"
+         "      target = maxScroll;"
+         "    }"
+         "    window.scrollTo(0, target);"
+         "  };"
+         "  restore();"
+         "  requestAnimationFrame(restore);"
+         "  requestAnimationFrame(() => requestAnimationFrame(restore));"
+         "})()",
+        @(scrollTop),
+        @(scrollRatio)];
+
+    [self.webView evaluateJavaScript:restoreScript completionHandler:nil];
 }
 
 - (void)webView:(WKWebView *)webView didFailNavigation:(WKNavigation *)navigation withError:(NSError *)error {
