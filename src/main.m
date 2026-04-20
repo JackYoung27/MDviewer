@@ -694,7 +694,7 @@ decisionHandler:(void (^)(WKNavigationActionPolicy))decisionHandler {
 }
 
 - (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication *)sender {
-    return YES;
+    return NO;
 }
 
 - (void)applicationDidFinishLaunching:(NSNotification *)notification {
@@ -830,9 +830,6 @@ decisionHandler:(void (^)(WKNavigationActionPolicy))decisionHandler {
     [NSApp activateIgnoringOtherApps:YES];
 
     if ([panel runModal] != NSModalResponseOK) {
-        if (self.windowControllers.count == 0) {
-            [NSApp terminate:nil];
-        }
         return;
     }
 
