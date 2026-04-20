@@ -10,6 +10,15 @@
     inputEl: null,
     countEl: null,
   };
+
+  const outlineState = {
+    panelEl: null,
+    expandBtnEl: null,
+    toggleBtnEl: null,
+    pinBtnEl: null,
+    open: false,
+    pinned: false,
+  };
   let renderedContentHtml = "";
   let renderedDocumentTitle = document.title;
 
@@ -78,6 +87,275 @@
     updateToggleButton();
   }
 
+  function buildOutlineTree(headings) {
+    const root = [];
+    const stack = [];
+
+    for (const el of headings) {
+      const level = parseInt(el.tagName[1], 10);
+      const node = { el, level, children: [] };
+
+      while (stack.length > 0 && stack[stack.length - 1].level >= level) {
+        stack.pop();
+      }
+
+      if (stack.length === 0) {
+        root.push(node);
+      } else {
+        stack[stack.length - 1].node.children.push(node);
+      }
+
+      stack.push({ node, level });
+    }
+
+    return root;
+  }
+
+  function renderOutlineList(nodes) {
+    const ul = document.createElement("ul");
+    ul.className = "outline-panel__list";
+
+    for (const node of nodes) {
+      const li = document.createElement("li");
+      li.className = "outline-panel__item";
+
+      const row = document.createElement("div");
+      row.className = "outline-panel__row";
+
+      let childList = null;
+
+      if (node.children.length > 0) {
+        const triBtn = document.createElement("button");
+        triBtn.className = "outline-panel__toggle";
+        triBtn.textContent = "\u2304";
+        triBtn.setAttribute("aria-label", "Collapse");
+        triBtn.setAttribute("type", "button");
+
+        childList = renderOutlineList(node.children);
+        childList.dataset.outlineChildren = "1";
+
+        triBtn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          const isCollapsed = childList.classList.toggle("outline-panel__children--collapsed");
+          triBtn.textContent = isCollapsed ? "\u203A" : "\u2304";
+          triBtn.setAttribute("aria-label", isCollapsed ? "Expand" : "Collapse");
+          updateExpandCollapseButton();
+        });
+
+        row.appendChild(triBtn);
+      } else {
+        const spacer = document.createElement("span");
+        spacer.className = "outline-panel__spacer";
+        row.appendChild(spacer);
+      }
+
+      const linkBtn = document.createElement("button");
+      linkBtn.className = "outline-panel__link";
+      linkBtn.textContent = node.el.textContent.trim();
+      linkBtn.setAttribute("type", "button");
+      linkBtn.addEventListener("click", () => {
+        node.el.scrollIntoView({ behavior: "smooth", block: "start" });
+        if (!outlineState.pinned) closeOutline();
+      });
+
+      row.appendChild(linkBtn);
+      li.appendChild(row);
+      if (childList) li.appendChild(childList);
+      ul.appendChild(li);
+    }
+
+    return ul;
+  }
+
+  function updateExpandCollapseButton() {
+    if (!outlineState.expandBtnEl || !outlineState.panelEl) return;
+    const collapsed = outlineState.panelEl.querySelectorAll(".outline-panel__children--collapsed");
+    outlineState.expandBtnEl.textContent = collapsed.length > 0 ? "Expand all" : "Collapse all";
+  }
+
+  function syncToggleIcons() {
+    for (const btn of outlineState.panelEl.querySelectorAll(".outline-panel__toggle")) {
+      const li = btn.closest(".outline-panel__item");
+      const childList = li && li.querySelector(":scope > [data-outline-children]");
+      if (childList) {
+        const isCollapsed = childList.classList.contains("outline-panel__children--collapsed");
+        btn.textContent = isCollapsed ? "\u203A" : "\u2304";
+        btn.setAttribute("aria-label", isCollapsed ? "Expand" : "Collapse");
+      }
+    }
+  }
+
+  function expandCollapseAll() {
+    if (!outlineState.panelEl) return;
+    const allChildLists = outlineState.panelEl.querySelectorAll("[data-outline-children]");
+    const collapsed = outlineState.panelEl.querySelectorAll(".outline-panel__children--collapsed");
+
+    if (collapsed.length > 0) {
+      for (const list of allChildLists) {
+        list.classList.remove("outline-panel__children--collapsed");
+      }
+    } else {
+      const content = outlineState.panelEl.querySelector(".outline-panel__content");
+      const rootUl = content && content.querySelector(".outline-panel__list");
+      const singleRoot = rootUl && rootUl.children.length === 1;
+
+      if (singleRoot) {
+        const firstLevel = new Set(
+          Array.from(rootUl.querySelectorAll(":scope > li > [data-outline-children]"))
+        );
+        for (const list of allChildLists) {
+          if (!firstLevel.has(list)) list.classList.add("outline-panel__children--collapsed");
+        }
+      } else {
+        for (const list of allChildLists) {
+          list.classList.add("outline-panel__children--collapsed");
+        }
+      }
+    }
+
+    syncToggleIcons();
+    updateExpandCollapseButton();
+  }
+
+  function rebuildOutline() {
+    if (!outlineState.panelEl) return;
+
+    const container = outlineState.panelEl.querySelector(".outline-panel__content");
+    container.innerHTML = "";
+
+    const headings = Array.from(contentEl.querySelectorAll("h1, h2, h3, h4, h5, h6"));
+
+    if (headings.length === 0) {
+      const empty = document.createElement("p");
+      empty.className = "outline-panel__empty";
+      empty.textContent = "No headings";
+      container.appendChild(empty);
+      outlineState.expandBtnEl.style.display = "none";
+      return;
+    }
+
+    outlineState.expandBtnEl.style.display = "";
+    container.appendChild(renderOutlineList(buildOutlineTree(headings)));
+    updateExpandCollapseButton();
+  }
+
+  function closeOutline() {
+    if (!outlineState.panelEl) return;
+    outlineState.panelEl.classList.remove("outline-panel--visible");
+    outlineState.open = false;
+    if (outlineState.toggleBtnEl) {
+      outlineState.toggleBtnEl.setAttribute("aria-expanded", "false");
+      outlineState.toggleBtnEl.setAttribute("aria-label", "Show outline");
+    }
+  }
+
+  function openOutline() {
+    if (!outlineState.panelEl) return;
+    closeFindBar();
+    outlineState.panelEl.classList.add("outline-panel--visible");
+    outlineState.open = true;
+    if (outlineState.toggleBtnEl) {
+      outlineState.toggleBtnEl.setAttribute("aria-expanded", "true");
+      outlineState.toggleBtnEl.setAttribute("aria-label", "Hide outline");
+    }
+  }
+
+  function toggleOutline() {
+    if (outlineState.open) {
+      closeOutline();
+    } else {
+      openOutline();
+    }
+  }
+
+  function togglePin() {
+    outlineState.pinned = !outlineState.pinned;
+    if (outlineState.pinBtnEl) {
+      outlineState.pinBtnEl.classList.toggle("outline-panel__pin-btn--active", outlineState.pinned);
+      outlineState.pinBtnEl.textContent = outlineState.pinned ? "pinned" : "pin";
+      outlineState.pinBtnEl.setAttribute("aria-pressed", String(outlineState.pinned));
+    }
+  }
+
+  function closeOutlineOnOutsideClick(event) {
+    if (!outlineState.open || outlineState.pinned || !outlineState.panelEl) return;
+
+    const target = event.target;
+    if (!(target instanceof Node)) return;
+
+    if (
+      outlineState.panelEl.contains(target) ||
+      (outlineState.toggleBtnEl && outlineState.toggleBtnEl.contains(target))
+    ) {
+      return;
+    }
+
+    closeOutline();
+  }
+
+  function createOutlinePanel() {
+    const btn = document.createElement("button");
+    btn.className = "outline-toggle";
+    btn.textContent = "\u2630";
+    btn.setAttribute("type", "button");
+    btn.setAttribute("aria-label", "Show outline");
+    btn.setAttribute("aria-expanded", "false");
+    btn.addEventListener("click", toggleOutline);
+    document.body.appendChild(btn);
+    outlineState.toggleBtnEl = btn;
+
+    const panel = document.createElement("div");
+    panel.className = "outline-panel";
+    panel.setAttribute("role", "navigation");
+    panel.setAttribute("aria-label", "Document outline");
+
+    const header = document.createElement("div");
+    header.className = "outline-panel__header";
+
+    const headerLeft = document.createElement("div");
+    headerLeft.className = "outline-panel__header-left";
+
+    const title = document.createElement("h2");
+    title.className = "outline-panel__title";
+    title.textContent = "Outline";
+
+    const pinBtn = document.createElement("button");
+    pinBtn.className = "outline-panel__pin-btn";
+    pinBtn.setAttribute("type", "button");
+    pinBtn.setAttribute("aria-label", "Pin panel open");
+    pinBtn.setAttribute("aria-pressed", "false");
+    pinBtn.textContent = "pin";
+    pinBtn.addEventListener("click", togglePin);
+    outlineState.pinBtnEl = pinBtn;
+
+    headerLeft.append(title, pinBtn);
+
+    const expandBtn = document.createElement("button");
+    expandBtn.className = "outline-panel__expand-btn";
+    expandBtn.setAttribute("type", "button");
+    expandBtn.textContent = "Collapse all";
+    expandBtn.addEventListener("click", expandCollapseAll);
+    outlineState.expandBtnEl = expandBtn;
+
+    header.append(headerLeft, expandBtn);
+
+    const content = document.createElement("div");
+    content.className = "outline-panel__content";
+    content.addEventListener("wheel", function (e) {
+      const atTop = this.scrollTop <= 0 && e.deltaY < 0;
+      const atBottom = this.scrollTop + this.clientHeight >= this.scrollHeight && e.deltaY > 0;
+      if (atTop || atBottom) e.preventDefault();
+    }, { passive: false });
+
+    panel.appendChild(header);
+    panel.appendChild(content);
+    document.body.appendChild(panel);
+    outlineState.panelEl = panel;
+    document.addEventListener("pointerdown", closeOutlineOnOutsideClick);
+
+    rebuildOutline();
+  }
+
   function updateSearchCountLabel() {
     if (!searchState.countEl) return;
 
@@ -100,6 +378,7 @@
     finalizeLinks(contentEl);
     finalizeImages(contentEl);
     document.title = renderedDocumentTitle;
+    rebuildOutline();
   }
 
   function clearSearchSelection() {
@@ -270,6 +549,7 @@
 
   function openFindBar() {
     if (!searchState.panelEl) return;
+    closeOutline();
     searchState.panelEl.classList.add("find-panel--visible");
     searchState.inputEl.focus();
     searchState.inputEl.select();
@@ -476,6 +756,7 @@
   window.mdvFindPreviousMatch = () => jumpToSearchMatch(-1);
   window.mdvCloseFindBar = closeFindBar;
 
+  createOutlinePanel();
   createSearchPanel();
   createToggleButton();
 })();
