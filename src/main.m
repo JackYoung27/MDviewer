@@ -836,7 +836,7 @@ decisionHandler:(void (^)(WKNavigationActionPolicy))decisionHandler {
         return;
     }
 
-    [self openFileURLs:panel.URLs reuseCurrentWindow:YES];
+    [self openFileURLs:panel.URLs reuseCurrentWindow:NO];
 }
 
 - (void)reloadPreview:(id)sender {
