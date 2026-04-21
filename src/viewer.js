@@ -96,6 +96,7 @@
 
   function applyRenderedContent() {
     contentEl.innerHTML = renderedContentHtml || "<p></p>";
+    setupCodeBlockCopy(contentEl);
     disableTaskCheckboxes(contentEl);
     finalizeLinks(contentEl);
     finalizeImages(contentEl);
@@ -404,6 +405,105 @@
 
     for (const checkbox of checkboxes) {
       checkbox.disabled = true;
+    }
+  }
+
+  async function copyTextToClipboard(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      try {
+        await navigator.clipboard.writeText(text);
+        return;
+      } catch (error) {
+        console.warn(error);
+      }
+    }
+
+    const textarea = document.createElement("textarea");
+    textarea.value = text;
+    textarea.className = "clipboard-fallback-input";
+    textarea.setAttribute("readonly", "");
+    document.body.appendChild(textarea);
+    textarea.focus();
+    textarea.select();
+
+    try {
+      if (!document.execCommand("copy")) {
+        throw new Error("Copy command was rejected.");
+      }
+    } finally {
+      textarea.remove();
+    }
+  }
+
+  function hasSelectionInside(element) {
+    const selection = window.getSelection();
+    if (!selection || selection.isCollapsed) {
+      return false;
+    }
+
+    return element.contains(selection.anchorNode) || element.contains(selection.focusNode);
+  }
+
+  function setCodeBlockCopyState(pre, state) {
+    pre.dataset.copyState = state;
+    if (state === "copied") {
+      pre.dataset.copyLabel = "Copied";
+    } else if (state === "failed") {
+      pre.dataset.copyLabel = "Copy failed";
+    } else {
+      pre.dataset.copyLabel = "Click to copy";
+    }
+  }
+
+  function flashCodeBlockCopyState(pre, state) {
+    setCodeBlockCopyState(pre, state);
+    window.clearTimeout(Number(pre.dataset.copyTimer || 0));
+    const timer = window.setTimeout(() => {
+      setCodeBlockCopyState(pre, "ready");
+      delete pre.dataset.copyTimer;
+    }, 1400);
+    pre.dataset.copyTimer = String(timer);
+  }
+
+  async function copyCodeBlock(pre, code) {
+    try {
+      await copyTextToClipboard(code.textContent || "");
+      flashCodeBlockCopyState(pre, "copied");
+    } catch (error) {
+      console.error(error);
+      flashCodeBlockCopyState(pre, "failed");
+    }
+  }
+
+  function setupCodeBlockCopy(root) {
+    const codeBlocks = root.querySelectorAll("pre > code");
+
+    for (const code of codeBlocks) {
+      const pre = code.parentElement;
+      if (!pre) continue;
+
+      pre.classList.add("code-block--copyable");
+      pre.setAttribute("role", "button");
+      pre.setAttribute("tabindex", "0");
+      pre.setAttribute("aria-label", "Copy code block");
+      setCodeBlockCopyState(pre, "ready");
+
+      pre.addEventListener("click", () => {
+        if (hasSelectionInside(pre)) {
+          return;
+        }
+
+        copyCodeBlock(pre, code);
+      });
+
+      pre.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter" && event.key !== " ") {
+          return;
+        }
+
+        event.preventDefault();
+        copyCodeBlock(pre, code);
+      });
     }
   }
 

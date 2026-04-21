@@ -196,11 +196,47 @@ body {
 }
 
 .document pre {
+  position: relative;
   overflow-x: auto;
   padding: 20px 22px;
   border-radius: 14px;
   background: var(--code-block-bg);
   color: var(--code-block-text);
+}
+
+.document pre.code-block--copyable {
+  cursor: copy;
+  outline: 1px solid transparent;
+  outline-offset: 2px;
+  transition: outline-color 0.15s;
+}
+
+.document pre.code-block--copyable:hover,
+.document pre.code-block--copyable:focus-visible {
+  outline-color: var(--accent);
+}
+
+.document pre.code-block--copyable::after {
+  content: attr(data-copy-label);
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  padding: 5px 7px;
+  border: 1px solid rgba(216, 226, 240, 0.22);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.36);
+  color: var(--code-block-text);
+  font: 500 11px/1 "SF Pro Text", "Segoe UI", sans-serif;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s;
+}
+
+.document pre.code-block--copyable:hover::after,
+.document pre.code-block--copyable:focus-visible::after,
+.document pre.code-block--copyable[data-copy-state="copied"]::after,
+.document pre.code-block--copyable[data-copy-state="failed"]::after {
+  opacity: 0.88;
 }
 
 .document pre code {
@@ -258,6 +294,12 @@ body {
 .document input[type="checkbox"] {
   margin-right: 8px;
   transform: translateY(1px);
+}
+
+.clipboard-fallback-input {
+  position: fixed;
+  top: -9999px;
+  left: -9999px;
 }
 
 .theme-toggle {
@@ -392,6 +434,11 @@ body:hover .theme-toggle {
 
   .theme-toggle,
   .find-panel {
+    display: none;
+  }
+
+  /* separating for a clean merge */
+  .document pre.code-block--copyable::after {
     display: none;
   }
 }
