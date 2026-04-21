@@ -767,6 +767,22 @@ decisionHandler:(void (^)(WKNavigationActionPolicy))decisionHandler {
     return nil;
 }
 
+- (NSURL *)standardizedFileURL:(NSURL *)fileURL {
+    return fileURL.fileURL ? fileURL.URLByStandardizingPath : [NSURL fileURLWithPath:fileURL.path];
+}
+
+- (MDVPreviewWindowController *)windowControllerForFileURL:(NSURL *)fileURL {
+    NSURL *standardURL = [self standardizedFileURL:fileURL];
+
+    for (MDVPreviewWindowController *controller in self.windowControllers) {
+        if ([controller.sourceFileURL isEqual:standardURL]) {
+            return controller;
+        }
+    }
+
+    return nil;
+}
+
 - (MDVPreviewWindowController *)newWindowController {
     MDVPreviewWindowController *controller = [[MDVPreviewWindowController alloc] init];
     __weak typeof(self) weakSelf = self;
@@ -796,6 +812,14 @@ decisionHandler:(void (^)(WKNavigationActionPolicy))decisionHandler {
 
     for (NSUInteger index = 0; index < urls.count; index += 1) {
         NSURL *fileURL = urls[index];
+        MDVPreviewWindowController *existingController = [self windowControllerForFileURL:fileURL];
+        if (existingController) {
+            [existingController showWindow:self];
+            [existingController.window makeKeyAndOrderFront:self];
+            [NSApp activateIgnoringOtherApps:YES];
+            continue;
+        }
+
         MDVPreviewWindowController *controller = (index == 0 && reusableController) ? reusableController : [self newWindowController];
         NSError *error = nil;
 
