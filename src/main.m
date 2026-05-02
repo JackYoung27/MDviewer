@@ -569,6 +569,27 @@ decisionHandler:(void (^)(WKNavigationActionPolicy))decisionHandler {
     [appMenu addItem:aboutItem];
     [appMenu addItem:[NSMenuItem separatorItem]];
 
+    NSMenuItem *hideItem = [[NSMenuItem alloc] initWithTitle:[NSString stringWithFormat:@"Hide %@", appName]
+                                                      action:@selector(hide:)
+                                               keyEquivalent:@"h"];
+    hideItem.target = NSApp;
+    [appMenu addItem:hideItem];
+
+    NSMenuItem *hideOthersItem = [[NSMenuItem alloc] initWithTitle:@"Hide Others"
+                                                            action:@selector(hideOtherApplications:)
+                                                     keyEquivalent:@"h"];
+    hideOthersItem.keyEquivalentModifierMask = (NSEventModifierFlagOption | NSEventModifierFlagCommand);
+    hideOthersItem.target = NSApp;
+    [appMenu addItem:hideOthersItem];
+
+    NSMenuItem *showAllItem = [[NSMenuItem alloc] initWithTitle:@"Show All"
+                                                         action:@selector(unhideAllApplications:)
+                                                  keyEquivalent:@""];
+    showAllItem.target = NSApp;
+    [appMenu addItem:showAllItem];
+
+    [appMenu addItem:[NSMenuItem separatorItem]];
+
     NSMenuItem *quitItem = [[NSMenuItem alloc] initWithTitle:[NSString stringWithFormat:@"Quit %@", appName]
                                                       action:@selector(terminate:)
                                                keyEquivalent:@"q"];
@@ -694,7 +715,7 @@ decisionHandler:(void (^)(WKNavigationActionPolicy))decisionHandler {
 }
 
 - (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication *)sender {
-    return YES;
+    return NO;
 }
 
 - (void)applicationDidFinishLaunching:(NSNotification *)notification {
@@ -767,6 +788,22 @@ decisionHandler:(void (^)(WKNavigationActionPolicy))decisionHandler {
     return nil;
 }
 
+- (NSURL *)standardizedFileURL:(NSURL *)fileURL {
+    return fileURL.fileURL ? fileURL.URLByStandardizingPath : [NSURL fileURLWithPath:fileURL.path];
+}
+
+- (MDVPreviewWindowController *)windowControllerForFileURL:(NSURL *)fileURL {
+    NSURL *standardURL = [self standardizedFileURL:fileURL];
+
+    for (MDVPreviewWindowController *controller in self.windowControllers) {
+        if ([controller.sourceFileURL isEqual:standardURL]) {
+            return controller;
+        }
+    }
+
+    return nil;
+}
+
 - (MDVPreviewWindowController *)newWindowController {
     MDVPreviewWindowController *controller = [[MDVPreviewWindowController alloc] init];
     __weak typeof(self) weakSelf = self;
@@ -796,6 +833,14 @@ decisionHandler:(void (^)(WKNavigationActionPolicy))decisionHandler {
 
     for (NSUInteger index = 0; index < urls.count; index += 1) {
         NSURL *fileURL = urls[index];
+        MDVPreviewWindowController *existingController = [self windowControllerForFileURL:fileURL];
+        if (existingController) {
+            [existingController showWindow:self];
+            [existingController.window makeKeyAndOrderFront:self];
+            [NSApp activateIgnoringOtherApps:YES];
+            continue;
+        }
+
         MDVPreviewWindowController *controller = (index == 0 && reusableController) ? reusableController : [self newWindowController];
         NSError *error = nil;
 
@@ -830,13 +875,10 @@ decisionHandler:(void (^)(WKNavigationActionPolicy))decisionHandler {
     [NSApp activateIgnoringOtherApps:YES];
 
     if ([panel runModal] != NSModalResponseOK) {
-        if (self.windowControllers.count == 0) {
-            [NSApp terminate:nil];
-        }
         return;
     }
 
-    [self openFileURLs:panel.URLs reuseCurrentWindow:YES];
+    [self openFileURLs:panel.URLs reuseCurrentWindow:NO];
 }
 
 - (void)reloadPreview:(id)sender {
