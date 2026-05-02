@@ -569,6 +569,27 @@ decisionHandler:(void (^)(WKNavigationActionPolicy))decisionHandler {
     [appMenu addItem:aboutItem];
     [appMenu addItem:[NSMenuItem separatorItem]];
 
+    NSMenuItem *hideItem = [[NSMenuItem alloc] initWithTitle:[NSString stringWithFormat:@"Hide %@", appName]
+                                                      action:@selector(hide:)
+                                               keyEquivalent:@"h"];
+    hideItem.target = NSApp;
+    [appMenu addItem:hideItem];
+
+    NSMenuItem *hideOthersItem = [[NSMenuItem alloc] initWithTitle:@"Hide Others"
+                                                            action:@selector(hideOtherApplications:)
+                                                     keyEquivalent:@"h"];
+    hideOthersItem.keyEquivalentModifierMask = (NSEventModifierFlagOption | NSEventModifierFlagCommand);
+    hideOthersItem.target = NSApp;
+    [appMenu addItem:hideOthersItem];
+
+    NSMenuItem *showAllItem = [[NSMenuItem alloc] initWithTitle:@"Show All"
+                                                         action:@selector(unhideAllApplications:)
+                                                  keyEquivalent:@""];
+    showAllItem.target = NSApp;
+    [appMenu addItem:showAllItem];
+
+    [appMenu addItem:[NSMenuItem separatorItem]];
+
     NSMenuItem *quitItem = [[NSMenuItem alloc] initWithTitle:[NSString stringWithFormat:@"Quit %@", appName]
                                                       action:@selector(terminate:)
                                                keyEquivalent:@"q"];
