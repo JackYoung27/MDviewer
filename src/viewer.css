@@ -8,6 +8,17 @@
   --inline-code-text: #bf1457;
   --code-block-bg: #162032;
   --code-block-text: #d8e2f0;
+  --code-block-border: rgba(19, 34, 51, 0.12);
+  --code-block-shadow: 0 14px 30px rgba(15, 23, 42, 0.12);
+  --code-copy-bg: rgba(245, 248, 252, 0.9);
+  --code-copy-bg-hover: rgba(255, 255, 255, 0.98);
+  --code-copy-border: rgba(148, 163, 184, 0.28);
+  --code-copy-text: #112033;
+  --code-copy-muted: #627083;
+  --code-copy-success-bg: rgba(196, 255, 220, 0.2);
+  --code-copy-success-text: #d6ffe5;
+  --code-copy-failed-bg: rgba(255, 127, 127, 0.16);
+  --code-copy-failed-text: #ffd3d3;
   --heading-text: #0f172a;
   --heading-border: #edf2f7;
   --blockquote-bg: #f5f8fc;
@@ -36,6 +47,17 @@
     --inline-code-text: #e8a0f0;
     --code-block-bg: #111111;
     --code-block-text: #d4d4d8;
+    --code-block-border: rgba(255, 255, 255, 0.08);
+    --code-block-shadow: 0 18px 38px rgba(0, 0, 0, 0.3);
+    --code-copy-bg: rgba(36, 36, 39, 0.82);
+    --code-copy-bg-hover: rgba(49, 49, 54, 0.96);
+    --code-copy-border: rgba(255, 255, 255, 0.08);
+    --code-copy-text: #f5f7fa;
+    --code-copy-muted: #a6afbb;
+    --code-copy-success-bg: rgba(76, 175, 109, 0.2);
+    --code-copy-success-text: #d9ffe6;
+    --code-copy-failed-bg: rgba(209, 70, 70, 0.24);
+    --code-copy-failed-text: #ffd8d8;
     --heading-text: #f2f2f4;
     --heading-border: #38383a;
     --blockquote-bg: #252527;
@@ -64,6 +86,17 @@
   --inline-code-text: #e8a0f0;
   --code-block-bg: #111111;
   --code-block-text: #d4d4d8;
+  --code-block-border: rgba(255, 255, 255, 0.08);
+  --code-block-shadow: 0 18px 38px rgba(0, 0, 0, 0.3);
+  --code-copy-bg: rgba(36, 36, 39, 0.82);
+  --code-copy-bg-hover: rgba(49, 49, 54, 0.96);
+  --code-copy-border: rgba(255, 255, 255, 0.08);
+  --code-copy-text: #f5f7fa;
+  --code-copy-muted: #a6afbb;
+  --code-copy-success-bg: rgba(76, 175, 109, 0.2);
+  --code-copy-success-text: #d9ffe6;
+  --code-copy-failed-bg: rgba(209, 70, 70, 0.24);
+  --code-copy-failed-text: #ffd8d8;
   --heading-text: #f2f2f4;
   --heading-border: #38383a;
   --blockquote-bg: #252527;
@@ -199,44 +232,15 @@ body {
   position: relative;
   overflow-x: auto;
   padding: 20px 22px;
-  border-radius: 14px;
+  border: 1px solid var(--code-block-border);
+  border-radius: 18px;
   background: var(--code-block-bg);
   color: var(--code-block-text);
+  box-shadow: var(--code-block-shadow);
 }
 
 .document pre.code-block--copyable {
-  cursor: copy;
-  outline: 1px solid transparent;
-  outline-offset: 2px;
-  transition: outline-color 0.15s;
-}
-
-.document pre.code-block--copyable:hover,
-.document pre.code-block--copyable:focus-visible {
-  outline-color: var(--accent);
-}
-
-.document pre.code-block--copyable::after {
-  content: attr(data-copy-label);
-  position: absolute;
-  top: 8px;
-  right: 10px;
-  padding: 5px 7px;
-  border: 1px solid rgba(216, 226, 240, 0.22);
-  border-radius: 6px;
-  background: rgba(0, 0, 0, 0.36);
-  color: var(--code-block-text);
-  font: 500 11px/1 "SF Pro Text", "Segoe UI", sans-serif;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.15s;
-}
-
-.document pre.code-block--copyable:hover::after,
-.document pre.code-block--copyable:focus-visible::after,
-.document pre.code-block--copyable[data-copy-state="copied"]::after,
-.document pre.code-block--copyable[data-copy-state="failed"]::after {
-  opacity: 0.88;
+  padding-top: 58px;
 }
 
 .document pre code {
@@ -244,6 +248,112 @@ body {
   background: transparent;
   color: inherit;
   font-size: 0.85em;
+}
+
+.code-copy-button {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 34px;
+  padding: 8px 12px 8px 11px;
+  border: 1px solid var(--code-copy-border);
+  border-radius: 999px;
+  background: var(--code-copy-bg);
+  color: var(--code-copy-text);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.14);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  font: 600 12px/1.1 "SF Pro Text", "Segoe UI", sans-serif;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  opacity: 0.82;
+  transition: transform 0.16s, opacity 0.16s, background-color 0.16s, border-color 0.16s, box-shadow 0.16s;
+}
+
+.document pre.code-block--copyable:hover .code-copy-button,
+.document pre.code-block--copyable:focus-within .code-copy-button,
+.code-copy-button[data-copy-state="copied"],
+.code-copy-button[data-copy-state="failed"] {
+  opacity: 1;
+}
+
+.code-copy-button:hover,
+.code-copy-button:focus-visible {
+  transform: translateY(-1px);
+  border-color: var(--accent);
+  background: var(--code-copy-bg-hover);
+  box-shadow: 0 14px 26px rgba(0, 0, 0, 0.18);
+  outline: none;
+}
+
+.code-copy-button__icon {
+  position: relative;
+  width: 15px;
+  height: 15px;
+  flex: 0 0 15px;
+}
+
+.code-copy-button__icon::before,
+.code-copy-button__icon::after {
+  content: "";
+  position: absolute;
+  border: 1.5px solid currentColor;
+  border-radius: 4px;
+}
+
+.code-copy-button__icon::before {
+  top: 1px;
+  left: 4px;
+  width: 9px;
+  height: 10px;
+  opacity: 0.62;
+}
+
+.code-copy-button__icon::after {
+  top: 4px;
+  left: 1px;
+  width: 9px;
+  height: 10px;
+  background: transparent;
+}
+
+.code-copy-button__text {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.code-copy-button__label {
+  color: inherit;
+}
+
+.code-copy-button__status {
+  color: var(--code-copy-muted);
+  font-weight: 500;
+}
+
+.code-copy-button[data-copy-state="copied"] {
+  background: var(--code-copy-success-bg);
+  color: var(--code-copy-success-text);
+}
+
+.code-copy-button[data-copy-state="copied"] .code-copy-button__status {
+  color: inherit;
+  opacity: 0.86;
+}
+
+.code-copy-button[data-copy-state="failed"] {
+  background: var(--code-copy-failed-bg);
+  color: var(--code-copy-failed-text);
+}
+
+.code-copy-button[data-copy-state="failed"] .code-copy-button__status {
+  color: inherit;
+  opacity: 0.86;
 }
 
 .document blockquote {
@@ -415,6 +525,20 @@ body:hover .theme-toggle {
     font-size: 12pt;
   }
 
+  .document pre.code-block--copyable {
+    padding-top: 64px;
+  }
+
+  .code-copy-button {
+    top: 10px;
+    right: 10px;
+    max-width: calc(100% - 20px);
+  }
+
+  .code-copy-button__status {
+    display: none;
+  }
+
   .find-panel {
     left: 14px;
     right: 56px;
@@ -434,7 +558,7 @@ body:hover .theme-toggle {
 
   .theme-toggle,
   .find-panel,
-  .document pre.code-block--copyable::after {
+  .code-copy-button {
     display: none;
   }
 }

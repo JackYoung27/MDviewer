@@ -12,6 +12,7 @@
   };
   let renderedContentHtml = "";
   let renderedDocumentTitle = document.title;
+  let mermaidRenderGeneration = 0;
 
   function getMode() {
     return localStorage.getItem("mdv-theme") || "auto";
@@ -48,6 +49,7 @@
       localStorage.setItem("mdv-theme", mode);
     }
     updateToggleButton();
+    renderMermaidFigures(contentEl);
   }
 
   function toggleTheme() {
@@ -96,10 +98,11 @@
 
   function applyRenderedContent() {
     contentEl.innerHTML = renderedContentHtml || "<p></p>";
-    setupCodeBlockCopy(contentEl);
     disableTaskCheckboxes(contentEl);
     finalizeLinks(contentEl);
     finalizeImages(contentEl);
+    renderMermaidDiagrams(contentEl);
+    setupCodeBlockCopy(contentEl);
     document.title = renderedDocumentTitle;
   }
 
@@ -408,6 +411,130 @@
     }
   }
 
+  function isMermaidCodeBlock(code) {
+    const className = code.className || "";
+    return /\b(language-mermaid|mermaid)\b/.test(className);
+  }
+
+  function configureMermaid() {
+    if (!window.mermaid) {
+      return false;
+    }
+
+    window.mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: "strict",
+      theme: getEffectiveTheme() === "dark" ? "dark" : "default",
+    });
+
+    return true;
+  }
+
+  function createMermaidFigure(source) {
+    const figure = document.createElement("figure");
+    figure.className = "mermaid-diagram";
+    figure.dataset.mermaidSource = source;
+
+    const status = document.createElement("p");
+    status.className = "mermaid-diagram__status";
+    status.textContent = "Rendering diagram...";
+    figure.appendChild(status);
+
+    return figure;
+  }
+
+  function setMermaidFallback(figure, source, message) {
+    figure.classList.add("mermaid-diagram--error");
+    figure.innerHTML = "";
+
+    const status = document.createElement("p");
+    status.className = "mermaid-diagram__status";
+    status.textContent = message || "Could not render Mermaid diagram.";
+
+    const pre = document.createElement("pre");
+    const code = document.createElement("code");
+    code.className = "language-mermaid";
+    code.textContent = source;
+    pre.appendChild(code);
+
+    figure.append(status, pre);
+  }
+
+  function svgToDataURL(svg) {
+    return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+  }
+
+  async function renderMermaidFigure(figure, source, generation, index) {
+    try {
+      const id = `mdv-mermaid-${generation}-${index}`;
+      const result = await window.mermaid.render(id, source);
+
+      if (generation !== mermaidRenderGeneration) {
+        return;
+      }
+
+      const sanitizedSvg = window.DOMPurify.sanitize(result.svg, {
+        USE_PROFILES: { svg: true, svgFilters: true },
+      });
+
+      if (!sanitizedSvg) {
+        throw new Error("Rendered SVG was empty after sanitization.");
+      }
+
+      const image = document.createElement("img");
+      image.className = "mermaid-diagram__image";
+      image.alt = "Mermaid diagram";
+      image.decoding = "async";
+      image.src = svgToDataURL(sanitizedSvg);
+
+      figure.classList.remove("mermaid-diagram--error");
+      figure.innerHTML = "";
+      figure.appendChild(image);
+    } catch (error) {
+      console.error(error);
+      setMermaidFallback(figure, source, "Could not render Mermaid diagram.");
+    }
+  }
+
+  function renderMermaidFigures(root) {
+    const figures = Array.from(root.querySelectorAll(".mermaid-diagram[data-mermaid-source]"));
+    if (figures.length === 0) {
+      return;
+    }
+
+    mermaidRenderGeneration += 1;
+    const generation = mermaidRenderGeneration;
+
+    if (!configureMermaid()) {
+      for (const figure of figures) {
+        setMermaidFallback(figure, figure.dataset.mermaidSource || "", "Mermaid renderer is unavailable.");
+      }
+      return;
+    }
+
+    figures.forEach((figure, index) => {
+      const source = figure.dataset.mermaidSource || "";
+      figure.classList.remove("mermaid-diagram--error");
+      figure.innerHTML = '<p class="mermaid-diagram__status">Rendering diagram...</p>';
+      renderMermaidFigure(figure, source, generation, index);
+    });
+  }
+
+  function renderMermaidDiagrams(root) {
+    const codeBlocks = Array.from(root.querySelectorAll("pre > code")).filter(isMermaidCodeBlock);
+
+    for (const code of codeBlocks) {
+      const pre = code.parentElement;
+      if (!pre) continue;
+
+      const source = code.textContent || "";
+      const figure = createMermaidFigure(source);
+      pre.replaceWith(figure);
+    }
+
+    renderMermaidFigures(root);
+  }
+
   async function copyTextToClipboard(text) {
     if (navigator.clipboard && navigator.clipboard.writeText) {
       try {
@@ -446,13 +573,23 @@
 
   function setCodeBlockCopyState(pre, state) {
     pre.dataset.copyState = state;
+    const button = pre.querySelector(".code-copy-button");
+    const label = button ? button.querySelector(".code-copy-button__label") : null;
+    const status = button ? button.querySelector(".code-copy-button__status") : null;
+
+    if (button) {
+      button.dataset.copyState = state;
+    }
 
     if (state === "copied") {
-      pre.dataset.copyLabel = "Copied";
+      if (label) label.textContent = "Copied";
+      if (status) status.textContent = "Ready to paste";
     } else if (state === "failed") {
-      pre.dataset.copyLabel = "Copy failed";
+      if (label) label.textContent = "Copy failed";
+      if (status) status.textContent = "Try again";
     } else {
-      pre.dataset.copyLabel = "Click to copy";
+      if (label) label.textContent = "Copy code";
+      if (status) status.textContent = "";
     }
   }
 
@@ -482,28 +619,44 @@
     const codeBlocks = root.querySelectorAll("pre > code");
 
     for (const code of codeBlocks) {
+      if (isMermaidCodeBlock(code)) continue;
+
       const pre = code.parentElement;
       if (!pre) continue;
 
       pre.classList.add("code-block--copyable");
-      pre.setAttribute("role", "button");
-      pre.setAttribute("tabindex", "0");
-      pre.setAttribute("aria-label", "Copy code block");
+
+      const button = document.createElement("button");
+      button.className = "code-copy-button";
+      button.type = "button";
+      button.setAttribute("aria-label", "Copy code block");
+
+      const icon = document.createElement("span");
+      icon.className = "code-copy-button__icon";
+      icon.setAttribute("aria-hidden", "true");
+
+      const text = document.createElement("span");
+      text.className = "code-copy-button__text";
+
+      const label = document.createElement("span");
+      label.className = "code-copy-button__label";
+
+      const status = document.createElement("span");
+      status.className = "code-copy-button__status";
+      status.setAttribute("aria-hidden", "true");
+
+      text.append(label, status);
+      button.append(icon, text);
+      pre.prepend(button);
       setCodeBlockCopyState(pre, "ready");
 
-      pre.addEventListener("click", () => {
+      button.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+
         if (!hasSelectionInside(pre)) {
           copyCodeBlock(pre, code);
         }
-      });
-
-      pre.addEventListener("keydown", (event) => {
-        if (event.key !== "Enter" && event.key !== " ") {
-          return;
-        }
-
-        event.preventDefault();
-        copyCodeBlock(pre, code);
       });
     }
   }
