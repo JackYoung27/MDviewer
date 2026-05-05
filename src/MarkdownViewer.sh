@@ -61,9 +61,10 @@ render_preview() {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; base-uri file:; img-src data: file: http: https:; media-src data: file: http: https:; style-src 'self'; script-src 'self'; connect-src 'none'; font-src data: file:; object-src 'none'; frame-src 'none'; form-action 'none';">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; base-uri file:; img-src data: file: http: https:; media-src data: file: http: https:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'none'; font-src data: file:; object-src 'none'; frame-src 'none'; form-action 'none';">
 <meta name="color-scheme" content="light dark">
 <title>Markdown Viewer</title>
+<link rel="stylesheet" href="vendor/katex.min.css">
 <link rel="stylesheet" href="viewer.css">
 </head>
 <body>
@@ -77,6 +78,8 @@ render_preview() {
 <script src="vendor/marked.umd.js"></script>
 <script src="vendor/purify.min.js"></script>
 <script src="vendor/mermaid.min.js"></script>
+<script src="vendor/katex.min.js"></script>
+<script src="vendor/katex-auto-render.min.js"></script>
 <script src="viewer.js"></script>
 </body>
 </html>
@@ -103,6 +106,10 @@ main() {
     require_resource "$RESOURCES_DIR/vendor/marked.umd.js" "marked.umd.js"
     require_resource "$RESOURCES_DIR/vendor/purify.min.js" "purify.min.js"
     require_resource "$RESOURCES_DIR/vendor/mermaid.min.js" "mermaid.min.js"
+    require_resource "$RESOURCES_DIR/vendor/katex.min.css" "katex.min.css"
+    require_resource "$RESOURCES_DIR/vendor/katex.min.js" "katex.min.js"
+    require_resource "$RESOURCES_DIR/vendor/katex-auto-render.min.js" "katex-auto-render.min.js"
+    require_resource "$RESOURCES_DIR/vendor/fonts" "KaTeX fonts"
 
     cleanup_old_previews
 

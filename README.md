@@ -42,6 +42,7 @@ MDviewer is different:
 - **Live reload** — re-renders automatically when the file changes on disk
 - **GitHub Flavored Markdown** — tables, task lists, fenced code blocks
 - **Mermaid diagrams** — renders fenced `mermaid` diagrams inline, fully local
+- **LaTeX math** — renders inline `$...$` and block `$$...$$` math with bundled KaTeX
 - **Dark mode** — follows your macOS appearance setting
 - **Secure** — HTML sanitized with [DOMPurify](https://github.com/cure53/DOMPurify), strict Content Security Policy
 - **Finder integration** — registers as default `.md` handler; double-click to open

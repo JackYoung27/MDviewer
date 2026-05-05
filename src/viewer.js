@@ -104,6 +104,7 @@
     finalizeLinks(contentEl);
     finalizeImages(contentEl);
     renderMermaidDiagrams(contentEl);
+    renderMath(contentEl);
     setupCodeBlockCopy(contentEl);
     document.title = renderedDocumentTitle;
   }
@@ -540,6 +541,24 @@
     renderMermaidFigures(root);
   }
 
+  function renderMath(root) {
+    if (!window.renderMathInElement) {
+      return;
+    }
+
+    window.renderMathInElement(root, {
+      delimiters: [
+        { left: "$$", right: "$$", display: true },
+        { left: "\\[", right: "\\]", display: true },
+        { left: "\\(", right: "\\)", display: false },
+        { left: "$", right: "$", display: false },
+      ],
+      ignoredTags: ["script", "noscript", "style", "textarea", "pre", "code", "option"],
+      ignoredClasses: ["mermaid-diagram"],
+      throwOnError: false,
+    });
+  }
+
   async function copyTextToClipboard(text) {
     if (navigator.clipboard && navigator.clipboard.writeText) {
       try {
@@ -733,6 +752,7 @@
       USE_PROFILES: { html: true },
       ALLOW_UNKNOWN_PROTOCOLS: false,
       FORBID_TAGS: ["script", "style"],
+      FORBID_ATTR: ["style"],
     });
 
     renderedContentHtml = sanitizedHtml || "<p></p>";

@@ -32,6 +32,11 @@ MERMAID_VERSION="11.14.0"
 MERMAID_FILE="package/dist/mermaid.min.js"
 MERMAID_SHA256="217b66ef4279c33c141b4afe22effad10a91c02558dc70917be2c0981e78ed87"
 
+KATEX_VERSION="0.16.45"
+KATEX_CSS_SHA256="23aefa0850248a16478b9f55d6b67028f74cc0b46b82b24dc22af068acaa4170"
+KATEX_JS_SHA256="e1c5d9e1b5b906881c40faf67950585a3f5d5adb4636d10e9678b9ba74b57dcc"
+KATEX_AUTO_RENDER_SHA256="e5372d199bcdae8b4de71d0f7ceba72a4ba12774a27c60a6f1f77d03b3228ee4"
+
 usage() {
     cat <<'EOF'
 Usage:
@@ -80,6 +85,28 @@ extract_npm_file() {
     fi
 
     cp "$temp_dir/$archive_member" "$destination"
+    rm -rf "$temp_dir"
+}
+
+extract_npm_dir() {
+    local package_name="$1"
+    local version="$2"
+    local archive_member="$3"
+    local destination="$4"
+    local archive_path="$CACHE_DIR/${package_name}-${version}.tgz"
+    local archive_url="https://registry.npmjs.org/${package_name}/-/${package_name}-${version}.tgz"
+    local temp_dir
+
+    mkdir -p "$CACHE_DIR"
+
+    if [ ! -f "$archive_path" ]; then
+        curl -fsSL "$archive_url" -o "$archive_path"
+    fi
+
+    temp_dir="$(mktemp -d)"
+    tar -xzf "$archive_path" -C "$temp_dir" "$archive_member"
+    rm -rf "$destination"
+    cp -R "$temp_dir/$archive_member" "$destination"
     rm -rf "$temp_dir"
 }
 
@@ -219,6 +246,11 @@ build_bundle() {
     extract_npm_file "dompurify" "$DOMPURIFY_VERSION" "package/LICENSE" "$LICENSES_DIR/dompurify-LICENSE"
     extract_npm_file "mermaid" "$MERMAID_VERSION" "$MERMAID_FILE" "$VENDOR_DIR/mermaid.min.js" "$MERMAID_SHA256"
     extract_npm_file "mermaid" "$MERMAID_VERSION" "package/LICENSE" "$LICENSES_DIR/mermaid-LICENSE"
+    extract_npm_file "katex" "$KATEX_VERSION" "package/dist/katex.min.css" "$VENDOR_DIR/katex.min.css" "$KATEX_CSS_SHA256"
+    extract_npm_file "katex" "$KATEX_VERSION" "package/dist/katex.min.js" "$VENDOR_DIR/katex.min.js" "$KATEX_JS_SHA256"
+    extract_npm_file "katex" "$KATEX_VERSION" "package/dist/contrib/auto-render.min.js" "$VENDOR_DIR/katex-auto-render.min.js" "$KATEX_AUTO_RENDER_SHA256"
+    extract_npm_dir "katex" "$KATEX_VERSION" "package/dist/fonts" "$VENDOR_DIR/fonts"
+    extract_npm_file "katex" "$KATEX_VERSION" "package/LICENSE" "$LICENSES_DIR/katex-LICENSE"
 
     chmod 755 "$RESOURCES_DIR/MarkdownViewer.sh"
     plutil -lint "$CONTENTS_DIR/Info.plist" >/dev/null

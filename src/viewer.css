@@ -286,6 +286,12 @@ body {
   margin-bottom: 0;
 }
 
+.katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.1em 0;
+}
+
 .code-copy-button {
   position: absolute;
   top: 12px;
