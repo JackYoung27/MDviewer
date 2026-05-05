@@ -28,6 +28,10 @@ DOMPURIFY_VERSION="3.3.2"
 DOMPURIFY_FILE="package/dist/purify.min.js"
 DOMPURIFY_SHA256="d448d28fdc0e16a906823f0f4db4688288c159bf6b82dc37a48949db4231d380"
 
+MERMAID_VERSION="11.14.0"
+MERMAID_FILE="package/dist/mermaid.min.js"
+MERMAID_SHA256="217b66ef4279c33c141b4afe22effad10a91c02558dc70917be2c0981e78ed87"
+
 usage() {
     cat <<'EOF'
 Usage:
@@ -213,6 +217,8 @@ build_bundle() {
     extract_npm_file "marked" "$MARKED_VERSION" "package/LICENSE.md" "$LICENSES_DIR/marked-LICENSE.md"
     extract_npm_file "dompurify" "$DOMPURIFY_VERSION" "$DOMPURIFY_FILE" "$VENDOR_DIR/purify.min.js" "$DOMPURIFY_SHA256"
     extract_npm_file "dompurify" "$DOMPURIFY_VERSION" "package/LICENSE" "$LICENSES_DIR/dompurify-LICENSE"
+    extract_npm_file "mermaid" "$MERMAID_VERSION" "$MERMAID_FILE" "$VENDOR_DIR/mermaid.min.js" "$MERMAID_SHA256"
+    extract_npm_file "mermaid" "$MERMAID_VERSION" "package/LICENSE" "$LICENSES_DIR/mermaid-LICENSE"
 
     chmod 755 "$RESOURCES_DIR/MarkdownViewer.sh"
     plutil -lint "$CONTENTS_DIR/Info.plist" >/dev/null

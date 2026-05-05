@@ -68,7 +68,9 @@
     }
 
     window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", function () {
-      if (getMode() === "auto") updateToggleButton();
+      if (getMode() !== "auto") return;
+      updateToggleButton();
+      renderMermaidFigures(contentEl);
     });
   }
 
@@ -434,18 +436,20 @@
     const figure = document.createElement("figure");
     figure.className = "mermaid-diagram";
     figure.dataset.mermaidSource = source;
-
-    const status = document.createElement("p");
-    status.className = "mermaid-diagram__status";
-    status.textContent = "Rendering diagram...";
-    figure.appendChild(status);
+    setMermaidStatus(figure, "Rendering diagram...");
 
     return figure;
   }
 
+  function setMermaidStatus(figure, message) {
+    const status = document.createElement("p");
+    status.className = "mermaid-diagram__status";
+    status.textContent = message;
+    figure.replaceChildren(status);
+  }
+
   function setMermaidFallback(figure, source, message) {
     figure.classList.add("mermaid-diagram--error");
-    figure.innerHTML = "";
 
     const status = document.createElement("p");
     status.className = "mermaid-diagram__status";
@@ -457,7 +461,7 @@
     code.textContent = source;
     pre.appendChild(code);
 
-    figure.append(status, pre);
+    figure.replaceChildren(status, pre);
   }
 
   function svgToDataURL(svg) {
@@ -473,24 +477,25 @@
         return;
       }
 
-      const sanitizedSvg = window.DOMPurify.sanitize(result.svg, {
-        USE_PROFILES: { svg: true, svgFilters: true },
-      });
+      const svg = result.svg;
 
-      if (!sanitizedSvg) {
-        throw new Error("Rendered SVG was empty after sanitization.");
+      if (!svg) {
+        throw new Error("Rendered SVG was empty.");
       }
 
       const image = document.createElement("img");
       image.className = "mermaid-diagram__image";
       image.alt = "Mermaid diagram";
       image.decoding = "async";
-      image.src = svgToDataURL(sanitizedSvg);
+      image.src = svgToDataURL(svg);
 
       figure.classList.remove("mermaid-diagram--error");
-      figure.innerHTML = "";
-      figure.appendChild(image);
+      figure.replaceChildren(image);
     } catch (error) {
+      if (generation !== mermaidRenderGeneration) {
+        return;
+      }
+
       console.error(error);
       setMermaidFallback(figure, source, "Could not render Mermaid diagram.");
     }
@@ -515,7 +520,7 @@
     figures.forEach((figure, index) => {
       const source = figure.dataset.mermaidSource || "";
       figure.classList.remove("mermaid-diagram--error");
-      figure.innerHTML = '<p class="mermaid-diagram__status">Rendering diagram...</p>';
+      setMermaidStatus(figure, "Rendering diagram...");
       renderMermaidFigure(figure, source, generation, index);
     });
   }
@@ -615,6 +620,31 @@
     }
   }
 
+  function createCopyIcon() {
+    const svgNS = "http://www.w3.org/2000/svg";
+    const icon = document.createElementNS(svgNS, "svg");
+    icon.classList.add("code-copy-button__icon");
+    icon.setAttribute("aria-hidden", "true");
+    icon.setAttribute("viewBox", "0 0 24 24");
+    icon.setAttribute("fill", "none");
+    icon.setAttribute("stroke", "currentColor");
+    icon.setAttribute("stroke-width", "1.8");
+    icon.setAttribute("stroke-linecap", "round");
+    icon.setAttribute("stroke-linejoin", "round");
+
+    for (const [x, y] of [["8", "4"], ["5", "8"]]) {
+      const page = document.createElementNS(svgNS, "rect");
+      page.setAttribute("x", x);
+      page.setAttribute("y", y);
+      page.setAttribute("width", "10");
+      page.setAttribute("height", "12");
+      page.setAttribute("rx", "2");
+      icon.appendChild(page);
+    }
+
+    return icon;
+  }
+
   function setupCodeBlockCopy(root) {
     const codeBlocks = root.querySelectorAll("pre > code");
 
@@ -631,10 +661,6 @@
       button.type = "button";
       button.setAttribute("aria-label", "Copy code block");
 
-      const icon = document.createElement("span");
-      icon.className = "code-copy-button__icon";
-      icon.setAttribute("aria-hidden", "true");
-
       const text = document.createElement("span");
       text.className = "code-copy-button__text";
 
@@ -646,7 +672,7 @@
       status.setAttribute("aria-hidden", "true");
 
       text.append(label, status);
-      button.append(icon, text);
+      button.append(createCopyIcon(), text);
       pre.prepend(button);
       setCodeBlockCopyState(pre, "ready");
 

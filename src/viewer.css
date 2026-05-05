@@ -250,6 +250,42 @@ body {
   font-size: 0.85em;
 }
 
+.mermaid-diagram {
+  margin: 0 0 1.1em;
+  padding: 18px;
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--blockquote-bg);
+}
+
+.mermaid-diagram__image {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0 auto;
+}
+
+.mermaid-diagram__status {
+  margin: 0;
+  color: var(--muted-text);
+  font: 500 13px/1.5 "SF Pro Text", "Segoe UI", sans-serif;
+}
+
+.mermaid-diagram--error {
+  border-color: var(--error-text);
+  background: var(--bg);
+}
+
+.mermaid-diagram--error .mermaid-diagram__status {
+  margin-bottom: 12px;
+  color: var(--error-text);
+}
+
+.mermaid-diagram--error pre {
+  margin-bottom: 0;
+}
+
 .code-copy-button {
   position: absolute;
   top: 12px;
@@ -290,34 +326,10 @@ body {
 }
 
 .code-copy-button__icon {
-  position: relative;
-  width: 15px;
-  height: 15px;
-  flex: 0 0 15px;
-}
-
-.code-copy-button__icon::before,
-.code-copy-button__icon::after {
-  content: "";
-  position: absolute;
-  border: 1.5px solid currentColor;
-  border-radius: 4px;
-}
-
-.code-copy-button__icon::before {
-  top: 1px;
-  left: 4px;
-  width: 9px;
-  height: 10px;
-  opacity: 0.62;
-}
-
-.code-copy-button__icon::after {
-  top: 4px;
-  left: 1px;
-  width: 9px;
-  height: 10px;
-  background: transparent;
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  opacity: 0.9;
 }
 
 .code-copy-button__text {

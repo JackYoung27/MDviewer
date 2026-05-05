@@ -76,6 +76,7 @@ render_preview() {
 </script>
 <script src="vendor/marked.umd.js"></script>
 <script src="vendor/purify.min.js"></script>
+<script src="vendor/mermaid.min.js"></script>
 <script src="viewer.js"></script>
 </body>
 </html>
@@ -101,6 +102,7 @@ main() {
     require_resource "$RESOURCES_DIR/viewer.js" "viewer.js"
     require_resource "$RESOURCES_DIR/vendor/marked.umd.js" "marked.umd.js"
     require_resource "$RESOURCES_DIR/vendor/purify.min.js" "purify.min.js"
+    require_resource "$RESOURCES_DIR/vendor/mermaid.min.js" "mermaid.min.js"
 
     cleanup_old_previews
 
