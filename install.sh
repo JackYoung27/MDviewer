@@ -30,6 +30,8 @@ main() {
     fi
 
     mkdir -p "$INSTALL_DIR"
+    # A stale bundle merged over breaks the code-signature seal; replace cleanly.
+    rm -rf "$TARGET_APP"
     ditto "$DIST_APP" "$TARGET_APP"
     "$LSREGISTER" -f "$TARGET_APP" >/dev/null
 
