@@ -31,3 +31,9 @@ if command -v codesign >/dev/null 2>&1; then
 fi
 
 echo "Done! Swift-powered bundle -> $APP_DIR"
+
+# "installer" also wraps the Swift bundle in the .pkg wizard.
+if [ "${1:-build}" = "installer" ]; then
+    echo "Building installer around the Swift bundle..."
+    MDV_SKIP_BUILD=1 "$ROOT_DIR/build.sh" installer
+fi
