@@ -1,8 +1,19 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        // Give the document open panel a beat to settle before asking.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+            DefaultHandlerOffer.offerIfNeeded()
+        }
+    }
+}
+
 @main
 struct MarkdownViewerApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+
     var body: some Scene {
         DocumentGroup(viewing: MarkdownDocument.self) { file in
             PreviewContainer(fileURL: file.fileURL)
