@@ -1,8 +1,12 @@
 #import <Foundation/Foundation.h>
+#import <CommonCrypto/CommonCrypto.h>
 #import <CoreGraphics/CoreGraphics.h>
 #import <JavaScriptCore/JavaScriptCore.h>
 #import <QuickLookUI/QuickLookUI.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
+#import <pwd.h>
+
+#import "render-helper.h"
 
 static NSString *const MDVQLErrorDomain = @"com.local.markdown-viewer.quicklook";
 
@@ -194,12 +198,104 @@ static NSString *MDVSubstituteMath(NSString *markdown,
     return working;
 }
 
-#pragma mark - Mermaid fallback
+#pragma mark - Mermaid
 
 // Mermaid needs a real browser engine, which the Quick Look sandbox refuses to
-// spawn (WebContent processes are terminated immediately) — diagrams degrade
-// to a styled source fallback.
-static NSString *MDVApplyMermaidFallback(NSString *html) {
+// spawn (WebContent processes are terminated immediately). The app caches every
+// SVG it renders, keyed by diagram content hash — the extension reuses those
+// and degrades to a styled source fallback for diagrams the app has never shown.
+static NSString *MDVSHA256Hex(NSString *text) {
+    NSData *data = [text dataUsingEncoding:NSUTF8StringEncoding];
+    unsigned char digest[CC_SHA256_DIGEST_LENGTH];
+    CC_SHA256(data.bytes, (CC_LONG)data.length, digest);
+    NSMutableString *hex = [NSMutableString stringWithCapacity:CC_SHA256_DIGEST_LENGTH * 2];
+    for (NSUInteger index = 0; index < CC_SHA256_DIGEST_LENGTH; index += 1) {
+        [hex appendFormat:@"%02x", digest[index]];
+    }
+    return hex;
+}
+
+// NSHomeDirectory() points inside the extension's sandbox container; the
+// app's cache lives under the user's real home, readable via the read-only
+// filesystem exception entitlement.
+static NSString *MDVRealHomeDirectory(void) {
+    struct passwd *userInfo = getpwuid(getuid());
+    return (userInfo && userInfo->pw_dir) ? @(userInfo->pw_dir) : NSHomeDirectory();
+}
+
+static NSString *MDVMermaidCachePath(void) {
+    return [MDVRealHomeDirectory() stringByAppendingPathComponent:@"Library/Application Support/Markdown Viewer/mermaid-cache"];
+}
+
+// The sandboxed extension cannot read preferences the normal way; the global
+// preferences plist under the real home reveals the current appearance.
+static NSString *MDVSystemTheme(void) {
+    NSString *plistPath = [MDVRealHomeDirectory()
+        stringByAppendingPathComponent:@"Library/Preferences/.GlobalPreferences.plist"];
+    NSDictionary *preferences = [NSDictionary dictionaryWithContentsOfFile:plistPath];
+    NSString *style = [preferences[@"AppleInterfaceStyle"] isKindOfClass:NSString.class] ? preferences[@"AppleInterfaceStyle"] : nil;
+    return [style isEqualToString:@"Dark"] ? @"dark" : @"light";
+}
+
+static NSString *MDVCachedMermaidSVGForTheme(NSString *hash, NSString *theme) {
+    NSString *filePath = [MDVMermaidCachePath() stringByAppendingPathComponent:
+                          [NSString stringWithFormat:@"%@-%@.svg", hash, theme]];
+    NSString *svg = [NSString stringWithContentsOfFile:filePath encoding:NSUTF8StringEncoding error:NULL];
+    return svg.length > 0 ? svg : nil;
+}
+
+// Cache miss: ask the on-demand launchd helper to render the diagram. launchd
+// spawns it lazily and it exits when idle, so this costs nothing at rest; if
+// the agent is not installed the lookup fails fast and we fall back.
+static NSString *MDVRequestMermaidRender(NSString *trimmedSource) {
+    NSXPCConnection *connection = [[NSXPCConnection alloc] initWithMachServiceName:MDVRenderHelperServiceName
+                                                                           options:0];
+    connection.remoteObjectInterface = [NSXPCInterface interfaceWithProtocol:@protocol(MDVRenderHelperProtocol)];
+    [connection resume];
+
+    dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
+    __block NSString *renderedSVG = nil;
+
+    id<MDVRenderHelperProtocol> proxy = [connection remoteObjectProxyWithErrorHandler:^(NSError *error) {
+        dispatch_semaphore_signal(semaphore);
+    }];
+    [proxy renderMermaidSource:trimmedSource theme:MDVSystemTheme() withReply:^(NSString *svg, NSString *errorMessage) {
+        renderedSVG = svg.length > 0 ? svg : nil;
+        dispatch_semaphore_signal(semaphore);
+    }];
+
+    dispatch_semaphore_wait(semaphore, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(25 * NSEC_PER_SEC)));
+    [connection invalidate];
+    return renderedSVG;
+}
+
+// Theme priority: an SVG matching the system appearance, then a live helper
+// render (which produces the system theme), then a stale-theme SVG as a last
+// resort — a wrong-theme diagram beats no diagram.
+static NSString *MDVMermaidSVGForSource(NSString *source) {
+    NSString *trimmed = [source stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    if (trimmed.length == 0) {
+        return nil;
+    }
+
+    NSString *hash = MDVSHA256Hex(trimmed);
+    NSString *systemTheme = MDVSystemTheme();
+
+    NSString *svg = MDVCachedMermaidSVGForTheme(hash, systemTheme);
+    if (svg) {
+        return svg;
+    }
+
+    svg = MDVRequestMermaidRender(trimmed);
+    if (svg) {
+        return svg;
+    }
+
+    NSString *otherTheme = [systemTheme isEqualToString:@"dark"] ? @"light" : @"dark";
+    return MDVCachedMermaidSVGForTheme(hash, otherTheme);
+}
+
+static NSString *MDVApplyMermaidRendering(NSString *html) {
     NSRegularExpression *mermaidBlock = [NSRegularExpression regularExpressionWithPattern:
         @"<pre><code class=\"language-mermaid\">([\\s\\S]*?)</code></pre>" options:0 error:NULL];
     NSArray<NSTextCheckingResult *> *matches = [mermaidBlock matchesInString:html options:0 range:NSMakeRange(0, html.length)];
@@ -209,12 +305,24 @@ static NSString *MDVApplyMermaidFallback(NSString *html) {
 
     NSMutableString *result = [html mutableCopy];
     for (NSTextCheckingResult *match in matches.reverseObjectEnumerator) {
-        NSString *source = [html substringWithRange:[match rangeAtIndex:1]];
-        NSString *figure = [NSString stringWithFormat:
-            @"<figure class=\"mermaid-diagram\">"
-             "<p class=\"mermaid-diagram__status\">Mermaid diagram — open in Markdown Viewer to render it.</p>"
-             "<pre><code class=\"language-mermaid\">%@</code></pre>"
-             "</figure>", source];
+        NSString *escapedSource = [html substringWithRange:[match rangeAtIndex:1]];
+        NSString *cachedSVG = MDVMermaidSVGForSource(MDVDecodeHTMLEntities(escapedSource));
+
+        NSString *figure;
+        if (cachedSVG) {
+            NSString *dataURI = [NSString stringWithFormat:@"data:image/svg+xml;base64,%@",
+                [[cachedSVG dataUsingEncoding:NSUTF8StringEncoding] base64EncodedStringWithOptions:0]];
+            figure = [NSString stringWithFormat:
+                @"<figure class=\"mermaid-diagram\">"
+                 "<img class=\"mermaid-diagram__image\" alt=\"Mermaid diagram\" src=\"%@\">"
+                 "</figure>", dataURI];
+        } else {
+            figure = [NSString stringWithFormat:
+                @"<figure class=\"mermaid-diagram\">"
+                 "<p class=\"mermaid-diagram__status\">Could not render Mermaid diagram.</p>"
+                 "<pre><code class=\"language-mermaid\">%@</code></pre>"
+                 "</figure>", escapedSource];
+        }
         [result replaceCharactersInRange:match.range withString:figure];
     }
     return result;
@@ -242,7 +350,7 @@ static NSString *MDVRenderPreviewBody(NSString *markdown, NSError **error) {
         html = resolved;
     }
 
-    return MDVApplyMermaidFallback(html);
+    return MDVApplyMermaidRendering(html);
 }
 
 static NSString *MDVDecodeHTMLEntities(NSString *text) {

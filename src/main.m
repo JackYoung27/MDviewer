@@ -1,4 +1,5 @@
 #import <Cocoa/Cocoa.h>
+#import <CommonCrypto/CommonCrypto.h>
 #import <CoreServices/CoreServices.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 #import <WebKit/WebKit.h>
@@ -45,7 +46,25 @@ static NSString *MDVPreferredFontScript(void) {
     return [NSString stringWithFormat:@"document.documentElement.setAttribute('data-font', '%@');", value];
 }
 
-@interface MDVPreviewWindowController : NSWindowController <NSWindowDelegate, WKNavigationDelegate, WKUIDelegate>
+// Rendered Mermaid SVGs are cached by content hash so the Quick Look
+// extension — which cannot run a browser engine — can reuse them.
+static NSString *MDVMermaidCacheDirectory(void) {
+    NSString *appSupport = NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES).firstObject;
+    return [[appSupport stringByAppendingPathComponent:@"Markdown Viewer"] stringByAppendingPathComponent:@"mermaid-cache"];
+}
+
+static NSString *MDVSHA256Hex(NSString *text) {
+    NSData *data = [text dataUsingEncoding:NSUTF8StringEncoding];
+    unsigned char digest[CC_SHA256_DIGEST_LENGTH];
+    CC_SHA256(data.bytes, (CC_LONG)data.length, digest);
+    NSMutableString *hex = [NSMutableString stringWithCapacity:CC_SHA256_DIGEST_LENGTH * 2];
+    for (NSUInteger index = 0; index < CC_SHA256_DIGEST_LENGTH; index += 1) {
+        [hex appendFormat:@"%02x", digest[index]];
+    }
+    return hex;
+}
+
+@interface MDVPreviewWindowController : NSWindowController <NSWindowDelegate, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler>
 
 @property(nonatomic, copy) void (^closeHandler)(void);
 @property(nonatomic, strong) WKWebView *webView;
@@ -102,12 +121,49 @@ static NSString *MDVPreferredFontScript(void) {
     [window setInitialFirstResponder:self.webView];
 
     [self installPreferredFontUserScript];
+    [self.webView.configuration.userContentController addScriptMessageHandler:self name:@"mermaidRendered"];
     [[NSNotificationCenter defaultCenter] addObserver:self
                                              selector:@selector(preferredFontDidChange:)
                                                  name:MDVPreferredFontDidChangeNotification
                                                object:nil];
 
     return self;
+}
+
+- (void)userContentController:(WKUserContentController *)userContentController
+      didReceiveScriptMessage:(WKScriptMessage *)message {
+    if (![message.name isEqualToString:@"mermaidRendered"] || ![message.body isKindOfClass:NSDictionary.class]) {
+        return;
+    }
+
+    NSDictionary *body = message.body;
+    NSString *source = [body[@"source"] isKindOfClass:NSString.class] ? body[@"source"] : nil;
+    NSString *svg = [body[@"svg"] isKindOfClass:NSString.class] ? body[@"svg"] : nil;
+    NSString *theme = [body[@"theme"] isKindOfClass:NSString.class] ? body[@"theme"] : nil;
+
+    static const NSUInteger MDVMaxCachedSVGLength = 4 * 1024 * 1024;
+    if (source.length == 0 || svg.length == 0 || svg.length > MDVMaxCachedSVGLength ||
+        !([theme isEqualToString:@"light"] || [theme isEqualToString:@"dark"])) {
+        return;
+    }
+
+    NSString *trimmedSource = [source stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    if (trimmedSource.length == 0) {
+        return;
+    }
+
+    NSString *cacheDirectory = MDVMermaidCacheDirectory();
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+        [[NSFileManager defaultManager] createDirectoryAtPath:cacheDirectory
+                                  withIntermediateDirectories:YES
+                                                   attributes:nil
+                                                        error:NULL];
+        NSString *fileName = [NSString stringWithFormat:@"%@-%@.svg", MDVSHA256Hex(trimmedSource), theme];
+        [svg writeToFile:[cacheDirectory stringByAppendingPathComponent:fileName]
+              atomically:YES
+                encoding:NSUTF8StringEncoding
+                   error:NULL];
+    });
 }
 
 - (void)installPreferredFontUserScript {
@@ -475,6 +531,7 @@ static void MDVFSEventCallback(ConstFSEventStreamRef streamRef,
 }
 
 - (void)windowWillClose:(NSNotification *)notification {
+    [self.webView.configuration.userContentController removeScriptMessageHandlerForName:@"mermaidRendered"];
     [self stopWatchingSourceFile];
     [self clearPendingScrollRestore];
     if (self.closeHandler) {

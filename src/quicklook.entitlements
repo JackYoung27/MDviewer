@@ -6,12 +6,17 @@
     <true/>
     <!-- Read-only filesystem access: lets previews load images the markdown
          references (which can live anywhere — external volumes, /tmp, shared
-         folders). Quick Look itself grants access to the previewed file;
-         nothing is writable. A home-relative exception was tried and broke
-         images for files outside the home. -->
+         folders) and the shared Mermaid SVG cache. Quick Look itself grants
+         access to the previewed file; nothing is writable. A home-relative
+         exception was tried and broke images for files outside the home. -->
     <key>com.apple.security.temporary-exception.files.absolute-path.read-only</key>
     <array>
         <string>/</string>
+    </array>
+    <!-- Lets the extension reach the (optional) on-demand mermaid render helper. -->
+    <key>com.apple.security.temporary-exception.mach-lookup.global-name</key>
+    <array>
+        <string>com.local.markdown-viewer.render-helper</string>
     </array>
 </dict>
 </plist>

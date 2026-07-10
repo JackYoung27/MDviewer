@@ -17,7 +17,43 @@ require_command() {
     fi
 }
 
+# Registers the on-demand mermaid render helper with launchd. The agent owns
+# no running process at rest; launchd spawns it when the Quick Look extension
+# connects and it exits itself when idle.
+install_render_helper_agent() {
+    "$TARGET_APP/Contents/Resources/register-mermaid-helper.sh" "$TARGET_APP" || \
+        printf 'Warning: could not register the mermaid render helper agent.\n' >&2
+}
+
+usage() {
+    cat <<'EOF'
+Usage:
+  ./install.sh                        Install the app and set it as default .md handler
+  ./install.sh --with-mermaid-helper  Also register the optional background helper that
+                                      renders Mermaid diagrams live in Quick Look
+                                      (appears under System Settings > Login Items)
+EOF
+}
+
 main() {
+    local with_mermaid_helper=0
+    local arg
+    for arg in "$@"; do
+        case "$arg" in
+            --with-mermaid-helper)
+                with_mermaid_helper=1
+                ;;
+            -h|--help)
+                usage
+                exit 0
+                ;;
+            *)
+                usage >&2
+                exit 1
+                ;;
+        esac
+    done
+
     require_command ditto
     require_command plutil
     require_command python3
@@ -152,6 +188,13 @@ PY
 
     "$LSREGISTER" -kill -seed -r -domain local -domain system -domain user >/dev/null 2>&1 || true
     "$LSREGISTER" -f "$TARGET_APP" >/dev/null
+
+    if [ "$with_mermaid_helper" -eq 1 ]; then
+        install_render_helper_agent
+    else
+        echo "Mermaid diagrams render in Quick Look after a file is opened in the app once."
+        echo "For live rendering of never-opened diagrams, re-run with --with-mermaid-helper."
+    fi
 
     killall cfprefsd Finder >/dev/null 2>&1 || true
 

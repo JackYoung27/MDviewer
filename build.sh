@@ -152,6 +152,19 @@ build_native_binary() {
         -o "$MACOS_DIR/MarkdownViewer"
 }
 
+build_render_helper() {
+    clang \
+        -fobjc-arc \
+        -Wall \
+        -Wextra \
+        -Wno-unused-parameter \
+        -isysroot "$SDK_PATH" \
+        -framework Cocoa \
+        -framework WebKit \
+        "$SRC_DIR/render-helper.m" \
+        -o "$MACOS_DIR/MarkdownViewerRenderHelper"
+}
+
 build_quicklook_extension() {
     mkdir -p "$QL_MACOS_DIR" "$QL_RESOURCES_DIR"
 
@@ -278,6 +291,8 @@ build_bundle() {
     cp "$SRC_DIR/MarkdownViewer.sh" "$RESOURCES_DIR/MarkdownViewer.sh"
     cp "$SRC_DIR/viewer.css" "$RESOURCES_DIR/viewer.css"
     cp "$SRC_DIR/viewer.js" "$RESOURCES_DIR/viewer.js"
+    cp "$SRC_DIR/register-mermaid-helper.sh" "$RESOURCES_DIR/register-mermaid-helper.sh"
+    chmod 755 "$RESOURCES_DIR/register-mermaid-helper.sh"
     cp "$SCRIPT_DIR/LICENSE" "$RESOURCES_DIR/LICENSE"
 
     extract_npm_file "marked" "$MARKED_VERSION" "$MARKED_FILE" "$VENDOR_DIR/marked.umd.js" "$MARKED_SHA256"
@@ -295,6 +310,7 @@ build_bundle() {
     extract_npm_file "geist" "$GEIST_VERSION" "$GEIST_FILE" "$VENDOR_DIR/geist/Geist-Variable.woff2" "$GEIST_SHA256"
     extract_npm_file "geist" "$GEIST_VERSION" "package/LICENSE.txt" "$LICENSES_DIR/geist-LICENSE.txt"
 
+    build_render_helper
     build_quicklook_extension
 
     chmod 755 "$RESOURCES_DIR/MarkdownViewer.sh"
@@ -304,6 +320,9 @@ build_bundle() {
     if command -v codesign >/dev/null 2>&1; then
         if ! codesign --force --sign - --entitlements "$SRC_DIR/quicklook.entitlements" "$QL_APPEX_DIR" >/dev/null 2>&1; then
             printf 'Warning: ad-hoc codesign of the Quick Look extension failed; Finder previews may not work.\n' >&2
+        fi
+        if ! codesign --force --sign - "$MACOS_DIR/MarkdownViewerRenderHelper" >/dev/null 2>&1; then
+            printf 'Warning: ad-hoc codesign of the render helper failed.\n' >&2
         fi
         if ! codesign --force --sign - "$APP_DIR" >/dev/null 2>&1; then
             printf 'Warning: ad-hoc codesign failed; continuing with unsigned bundle.\n' >&2
