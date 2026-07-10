@@ -53,6 +53,7 @@ Usage:
   ./build.sh build      Same as default
   ./build.sh archive    Build the app bundle and create a release zip
   ./build.sh installer  Build a .pkg installer with optional-feature choices
+  ./build.sh notarize   Build, submit to Apple notary service, staple
   ./build.sh clean      Remove dist/ build outputs
 EOF
 }
@@ -153,6 +154,30 @@ build_native_binary() {
         -o "$MACOS_DIR/MarkdownViewer"
 }
 
+# Picks the best available signing identity: CODESIGN_IDENTITY override,
+# then Developer ID Application, then Apple Development, then ad-hoc.
+resolve_signing_identity() {
+    if [ -n "${CODESIGN_IDENTITY:-}" ]; then
+        printf '%s' "$CODESIGN_IDENTITY"
+        return
+    fi
+
+    local identity
+    identity="$(security find-identity -v -p codesigning 2>/dev/null | awk -F'"' '/Developer ID Application/ {print $2; exit}')"
+    if [ -n "$identity" ]; then
+        printf '%s' "$identity"
+        return
+    fi
+
+    identity="$(security find-identity -v -p codesigning 2>/dev/null | awk -F'"' '/Apple Development/ {print $2; exit}')"
+    if [ -n "$identity" ]; then
+        printf '%s' "$identity"
+        return
+    fi
+
+    printf '%s' "-"
+}
+
 build_render_helper() {
     clang \
         -fobjc-arc \
@@ -161,6 +186,7 @@ build_render_helper() {
         -Wno-unused-parameter \
         -isysroot "$SDK_PATH" \
         -framework Cocoa \
+        -framework Security \
         -framework WebKit \
         "$SRC_DIR/render-helper.m" \
         -o "$MACOS_DIR/MarkdownViewerRenderHelper"
@@ -319,17 +345,38 @@ build_bundle() {
     plutil -lint "$CONTENTS_DIR/Info.plist" >/dev/null
     bash -n "$RESOURCES_DIR/MarkdownViewer.sh"
 
+    # Signing: prefers Developer ID (notarizable distribution), then Apple
+    # Development (real local identity), then ad-hoc. Override with
+    # CODESIGN_IDENTITY. A Mac App Store build instead needs an Apple
+    # Distribution cert + provisioning, App Sandbox on every binary, and no
+    # temporary-exception entitlements.
     if command -v codesign >/dev/null 2>&1; then
-        if ! codesign --force --sign - --entitlements "$SRC_DIR/quicklook.entitlements" "$QL_APPEX_DIR" >/dev/null 2>&1; then
-            printf 'Warning: ad-hoc codesign of the Quick Look extension failed; Finder previews may not work.\n' >&2
+        local identity sign_flags
+        identity="$(resolve_signing_identity)"
+        sign_flags=()
+        case "$identity" in
+            "Developer ID Application"*)
+                # Hardened runtime + secure timestamp are notarization requirements.
+                sign_flags=(--options runtime --timestamp)
+                ;;
+        esac
+
+        if ! codesign --force --sign "$identity" "${sign_flags[@]+"${sign_flags[@]}"}" --entitlements "$SRC_DIR/quicklook.entitlements" "$QL_APPEX_DIR" >/dev/null 2>&1; then
+            printf 'Warning: codesign of the Quick Look extension failed; Finder previews may not work.\n' >&2
         fi
-        if ! codesign --force --sign - "$MACOS_DIR/MarkdownViewerRenderHelper" >/dev/null 2>&1; then
-            printf 'Warning: ad-hoc codesign of the render helper failed.\n' >&2
+        if ! codesign --force --sign "$identity" "${sign_flags[@]+"${sign_flags[@]}"}" "$MACOS_DIR/MarkdownViewerRenderHelper" >/dev/null 2>&1; then
+            printf 'Warning: codesign of the render helper failed.\n' >&2
         fi
-        if ! codesign --force --sign - "$APP_DIR" >/dev/null 2>&1; then
-            printf 'Warning: ad-hoc codesign failed; continuing with unsigned bundle.\n' >&2
+        if ! codesign --force --sign "$identity" "${sign_flags[@]+"${sign_flags[@]}"}" "$APP_DIR" >/dev/null 2>&1; then
+            printf 'Warning: codesign failed; continuing with unsigned bundle.\n' >&2
         elif ! codesign --verify --deep --strict "$APP_DIR" >/dev/null 2>&1; then
             printf 'Warning: codesign verification failed; continuing with bundle as built.\n' >&2
+        fi
+
+        if [ "$identity" = "-" ]; then
+            echo "Signed ad-hoc (no signing identity in keychain; set one up in Xcode > Settings > Accounts)"
+        else
+            echo "Signed with: $identity"
         fi
     fi
 
@@ -385,13 +432,51 @@ build_installer() {
 
     sed "s/@VERSION@/$version/g" "$SCRIPT_DIR/installer/distribution.xml" > "$pkg_dir/distribution.xml"
 
-    productbuild --quiet \
-        --distribution "$pkg_dir/distribution.xml" \
-        --package-path "$pkg_dir" \
-        --resources "$SCRIPT_DIR/installer/resources" \
-        "$installer_path"
+    local installer_identity
+    installer_identity="$(security find-identity -v 2>/dev/null | awk -F'"' '/Developer ID Installer/ {print $2; exit}')"
 
-    echo "Installer -> $installer_path"
+    if [ -n "$installer_identity" ]; then
+        productbuild --quiet \
+            --distribution "$pkg_dir/distribution.xml" \
+            --package-path "$pkg_dir" \
+            --resources "$SCRIPT_DIR/installer/resources" \
+            --sign "$installer_identity" \
+            "$installer_path"
+        echo "Installer (signed: $installer_identity) -> $installer_path"
+    else
+        productbuild --quiet \
+            --distribution "$pkg_dir/distribution.xml" \
+            --package-path "$pkg_dir" \
+            --resources "$SCRIPT_DIR/installer/resources" \
+            "$installer_path"
+        echo "Installer (unsigned) -> $installer_path"
+    fi
+}
+
+# Submits the release zip to Apple's notary service and staples the ticket.
+# One-time setup: xcrun notarytool store-credentials mdviewer-notary \
+#   --apple-id <you> --team-id <TEAMID> (uses an app-specific password).
+notarize_archive() {
+    local identity
+    identity="$(resolve_signing_identity)"
+    case "$identity" in
+        "Developer ID Application"*) ;;
+        *)
+            printf 'Notarization needs a "Developer ID Application" certificate in the keychain (found: %s).\n' "$identity" >&2
+            exit 1
+            ;;
+    esac
+
+    archive_bundle
+
+    echo "Submitting to Apple notary service (this can take a few minutes)..."
+    xcrun notarytool submit "$ARCHIVE_PATH" --keychain-profile "${NOTARY_PROFILE:-mdviewer-notary}" --wait
+    xcrun stapler staple "$APP_DIR"
+
+    # Re-zip so the archive contains the stapled bundle.
+    rm -f "$ARCHIVE_PATH"
+    ditto -c -k --sequesterRsrc --keepParent "$APP_DIR" "$ARCHIVE_PATH"
+    echo "Notarized + stapled -> $ARCHIVE_PATH"
 }
 
 clean_outputs() {
@@ -411,6 +496,9 @@ main() {
             ;;
         installer)
             build_installer
+            ;;
+        notarize)
+            notarize_archive
             ;;
         clean)
             clean_outputs

@@ -3,6 +3,7 @@
 // spawns this binary when the extension connects and it exits when idle.
 #import <Cocoa/Cocoa.h>
 #import <CommonCrypto/CommonCrypto.h>
+#import <Security/Security.h>
 #import <WebKit/WebKit.h>
 
 #import "render-helper.h"
@@ -193,7 +194,50 @@ static NSMutableSet<MDVMermaidRender *> *MDVActiveRenderSet(void) {
 
 @implementation MDVHelperListenerDelegate
 
+// Team identifier from this process's own signature; nil for ad-hoc builds.
+static NSString *MDVOwnTeamIdentifier(void) {
+    static NSString *team = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        SecCodeRef selfCode = NULL;
+        if (SecCodeCopySelf(kSecCSDefaultFlags, &selfCode) != errSecSuccess) {
+            return;
+        }
+        SecStaticCodeRef staticCode = NULL;
+        OSStatus status = SecCodeCopyStaticCode(selfCode, kSecCSDefaultFlags, &staticCode);
+        CFRelease(selfCode);
+        if (status != errSecSuccess) {
+            return;
+        }
+        CFDictionaryRef information = NULL;
+        status = SecCodeCopySigningInformation(staticCode, kSecCSSigningInformation, &information);
+        CFRelease(staticCode);
+        if (status != errSecSuccess || !information) {
+            return;
+        }
+        NSString *identifier = ((__bridge NSDictionary *)information)[(__bridge NSString *)kSecCodeInfoTeamIdentifier];
+        if ([identifier isKindOfClass:NSString.class] && identifier.length > 0) {
+            team = [identifier copy];
+        }
+        CFRelease(information);
+    });
+    return team;
+}
+
+// Only accept callers signed by the same team as this helper. Ad-hoc builds
+// carry no team, so local development skips the check. For the Mac App Store,
+// replace the LaunchAgent + global mach service with SMAppService and an
+// app-group-prefixed service name.
 - (BOOL)listener:(NSXPCListener *)listener shouldAcceptNewConnection:(NSXPCConnection *)newConnection {
+    NSString *team = MDVOwnTeamIdentifier();
+    if (team.length > 0) {
+        if (@available(macOS 13.0, *)) {
+            NSString *requirement = [NSString stringWithFormat:
+                @"anchor apple generic and certificate leaf[subject.OU] = \"%@\"", team];
+            [newConnection setCodeSigningRequirement:requirement];
+        }
+    }
+
     newConnection.exportedInterface = [NSXPCInterface interfaceWithProtocol:@protocol(MDVRenderHelperProtocol)];
     newConnection.exportedObject = self;
     [newConnection resume];

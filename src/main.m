@@ -1130,6 +1130,11 @@ decisionHandler:(void (^)(WKNavigationActionPolicy))decisionHandler {
 
 @end
 
+// TODO(distribution): sandbox the main app (App Sandbox is mandatory for the
+// Mac App Store): user-selected read/write for open/export, security-scoped
+// bookmarks for recent documents and live reload, network.client for the
+// manual update check, and an app group shared with the Quick Look extension
+// to replace the mermaid cache's home-relative path.
 int main(int argc, const char *argv[]) {
     @autoreleasepool {
         NSApplication *application = [NSApplication sharedApplication];
