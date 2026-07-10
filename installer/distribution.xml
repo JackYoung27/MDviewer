@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<installer-gui-script minSpecVersion="2">
+    <title>Markdown Viewer</title>
+    <welcome file="welcome.html"/>
+    <conclusion file="conclusion.html"/>
+    <options customize="always" require-scripts="false" rootVolumeOnly="true"/>
+    <domains enable_localSystem="true"/>
+    <choices-outline>
+        <line choice="app"/>
+        <line choice="default-handler"/>
+        <line choice="mermaid-helper"/>
+    </choices-outline>
+    <choice id="app"
+            title="Markdown Viewer"
+            description="The app and its Quick Look extension (spacebar previews in Finder). Installed in /Applications."
+            enabled="false"
+            selected="true">
+        <pkg-ref id="com.local.markdown-viewer.pkg.app"/>
+    </choice>
+    <choice id="default-handler"
+            title="Open .md files with Markdown Viewer"
+            description="Makes Markdown Viewer the default app for .md, .markdown, .mdown, and .mkd files."
+            start_selected="true">
+        <pkg-ref id="com.local.markdown-viewer.pkg.default-handler"/>
+    </choice>
+    <choice id="mermaid-helper"
+            title="Mermaid Quick Look helper"
+            description="Renders Mermaid diagrams live in Quick Look previews, even for files never opened in the app. Adds a background item (visible under System Settings &gt; Login Items) that is started on demand by macOS and quits after 45 seconds of inactivity."
+            start_selected="false">
+        <pkg-ref id="com.local.markdown-viewer.pkg.mermaid-helper"/>
+    </choice>
+    <pkg-ref id="com.local.markdown-viewer.pkg.app" version="@VERSION@" onConclusion="none">app.pkg</pkg-ref>
+    <pkg-ref id="com.local.markdown-viewer.pkg.default-handler" version="@VERSION@" onConclusion="none">default-handler.pkg</pkg-ref>
+    <pkg-ref id="com.local.markdown-viewer.pkg.mermaid-helper" version="@VERSION@" onConclusion="none">mermaid-helper.pkg</pkg-ref>
+</installer-gui-script>

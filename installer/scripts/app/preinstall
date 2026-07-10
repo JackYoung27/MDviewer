@@ -1,0 +1,8 @@
+#!/bin/bash
+# Files left behind from an older install would break the new bundle's
+# code-signature seal; remove the previous copy before the payload lands.
+
+set -euo pipefail
+
+rm -rf "/Applications/Markdown Viewer.app"
+exit 0

@@ -1,0 +1,17 @@
+#!/bin/bash
+# Runs as root; registers the per-user mermaid render helper agent as the
+# console user via the script shipped inside the installed app.
+
+set -euo pipefail
+
+APP_PATH="/Applications/Markdown Viewer.app"
+REGISTER_SCRIPT="$APP_PATH/Contents/Resources/register-mermaid-helper.sh"
+
+console_user="$(stat -f %Su /dev/console)"
+if [ -z "$console_user" ] || [ "$console_user" = "root" ] || [ ! -x "$REGISTER_SCRIPT" ]; then
+    exit 0
+fi
+uid="$(id -u "$console_user")"
+
+launchctl asuser "$uid" sudo -u "$console_user" "$REGISTER_SCRIPT" "$APP_PATH" || true
+exit 0

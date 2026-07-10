@@ -49,10 +49,11 @@ KATEX_AUTO_RENDER_SHA256="e5372d199bcdae8b4de71d0f7ceba72a4ba12774a27c60a6f1f77d
 usage() {
     cat <<'EOF'
 Usage:
-  ./build.sh           Build the app bundle into dist/
-  ./build.sh build     Same as default
-  ./build.sh archive   Build the app bundle and create a release zip
-  ./build.sh clean     Remove dist/ build outputs
+  ./build.sh            Build the app bundle into dist/
+  ./build.sh build      Same as default
+  ./build.sh archive    Build the app bundle and create a release zip
+  ./build.sh installer  Build a .pkg installer with optional-feature choices
+  ./build.sh clean      Remove dist/ build outputs
 EOF
 }
 
@@ -291,6 +292,7 @@ build_bundle() {
     cp "$SRC_DIR/MarkdownViewer.sh" "$RESOURCES_DIR/MarkdownViewer.sh"
     cp "$SRC_DIR/viewer.css" "$RESOURCES_DIR/viewer.css"
     cp "$SRC_DIR/viewer.js" "$RESOURCES_DIR/viewer.js"
+    cp "$SRC_DIR/set-default-handler.py" "$RESOURCES_DIR/set-default-handler.py"
     cp "$SRC_DIR/register-mermaid-helper.sh" "$RESOURCES_DIR/register-mermaid-helper.sh"
     chmod 755 "$RESOURCES_DIR/register-mermaid-helper.sh"
     cp "$SCRIPT_DIR/LICENSE" "$RESOURCES_DIR/LICENSE"
@@ -340,6 +342,58 @@ archive_bundle() {
     echo "Archive -> $ARCHIVE_PATH"
 }
 
+# Builds a macOS installer package with a customization step: the app itself
+# (required) plus optional choices for the default .md handler and the
+# Mermaid Quick Look helper.
+build_installer() {
+    build_bundle
+
+    require_command pkgbuild
+    require_command productbuild
+
+    local version pkg_dir root_dir installer_path
+    version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$SRC_DIR/Info.plist")"
+    pkg_dir="$BUILD_DIR/pkg"
+    root_dir="$pkg_dir/root"
+    installer_path="$DIST_DIR/Markdown-Viewer-Installer.pkg"
+
+    rm -rf "$pkg_dir" "$installer_path"
+    mkdir -p "$root_dir/Applications"
+    ditto "$APP_DIR" "$root_dir/Applications/$APP_NAME.app"
+
+    pkgbuild --quiet \
+        --root "$root_dir" \
+        --scripts "$SCRIPT_DIR/installer/scripts/app" \
+        --identifier "com.local.markdown-viewer.pkg.app" \
+        --version "$version" \
+        --install-location "/" \
+        "$pkg_dir/app.pkg"
+
+    pkgbuild --quiet \
+        --nopayload \
+        --scripts "$SCRIPT_DIR/installer/scripts/default-handler" \
+        --identifier "com.local.markdown-viewer.pkg.default-handler" \
+        --version "$version" \
+        "$pkg_dir/default-handler.pkg"
+
+    pkgbuild --quiet \
+        --nopayload \
+        --scripts "$SCRIPT_DIR/installer/scripts/mermaid-helper" \
+        --identifier "com.local.markdown-viewer.pkg.mermaid-helper" \
+        --version "$version" \
+        "$pkg_dir/mermaid-helper.pkg"
+
+    sed "s/@VERSION@/$version/g" "$SCRIPT_DIR/installer/distribution.xml" > "$pkg_dir/distribution.xml"
+
+    productbuild --quiet \
+        --distribution "$pkg_dir/distribution.xml" \
+        --package-path "$pkg_dir" \
+        --resources "$SCRIPT_DIR/installer/resources" \
+        "$installer_path"
+
+    echo "Installer -> $installer_path"
+}
+
 clean_outputs() {
     rm -rf "$DIST_DIR"
     echo "Removed $DIST_DIR"
@@ -354,6 +408,9 @@ main() {
             ;;
         archive)
             archive_bundle
+            ;;
+        installer)
+            build_installer
             ;;
         clean)
             clean_outputs

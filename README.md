@@ -67,9 +67,13 @@ MDviewer is different:
 ```bash
 git clone https://github.com/JackYoung27/mdviewer.git
 cd mdviewer
-./build.sh          # builds to dist/Markdown Viewer.app
-./install.sh        # optional: copies to /Applications and sets as default handler
-                    # add --with-mermaid-helper for live Mermaid in Quick Look
+./build.sh            # builds to dist/Markdown Viewer.app
+./build.sh installer  # builds dist/Markdown-Viewer-Installer.pkg — a standard
+                      # macOS installer with checkboxes for "default .md viewer"
+                      # and the optional Mermaid Quick Look helper
+./install.sh          # CLI alternative: copies to /Applications and sets as
+                      # default handler; add --with-mermaid-helper for live
+                      # Mermaid in Quick Look
 ```
 
 ## Permissions
