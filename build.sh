@@ -393,7 +393,14 @@ archive_bundle() {
 # (required) plus optional choices for the default .md handler and the
 # Mermaid Quick Look helper.
 build_installer() {
-    build_bundle
+    # MDV_SKIP_BUILD=1 packs the bundle already in dist/ (used by the Swift
+    # port's build script to ship its own binaries in the installer).
+    if [ "${MDV_SKIP_BUILD:-0}" != "1" ]; then
+        build_bundle
+    elif [ ! -d "$APP_DIR" ]; then
+        printf 'MDV_SKIP_BUILD=1 but no bundle at %s\n' "$APP_DIR" >&2
+        exit 1
+    fi
 
     require_command pkgbuild
     require_command productbuild
