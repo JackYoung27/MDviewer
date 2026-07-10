@@ -569,6 +569,13 @@ decisionHandler:(void (^)(WKNavigationActionPolicy))decisionHandler {
     [appMenu addItem:aboutItem];
     [appMenu addItem:[NSMenuItem separatorItem]];
 
+    NSMenuItem *updatesItem = [[NSMenuItem alloc] initWithTitle:@"Check for Updates…"
+                                                         action:@selector(checkForUpdates:)
+                                                  keyEquivalent:@""];
+    updatesItem.target = self;
+    [appMenu addItem:updatesItem];
+    [appMenu addItem:[NSMenuItem separatorItem]];
+
     NSMenuItem *hideItem = [[NSMenuItem alloc] initWithTitle:[NSString stringWithFormat:@"Hide %@", appName]
                                                       action:@selector(hide:)
                                                keyEquivalent:@"h"];
@@ -722,10 +729,11 @@ decisionHandler:(void (^)(WKNavigationActionPolicy))decisionHandler {
     if (!self.openedFileDuringLaunch) {
         [self openDocument:nil];
     }
-    [self checkForUpdates];
 }
 
-- (void)checkForUpdates {
+// Only ever runs when the user picks "Check for Updates…" — the app makes no
+// network requests on its own.
+- (void)checkForUpdates:(id)sender {
     NSString *currentVersion = [[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleShortVersionString"] ?: @"0.0.0";
 
     NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:MDVReleasesURL]];
@@ -733,20 +741,30 @@ decisionHandler:(void (^)(WKNavigationActionPolicy))decisionHandler {
     request.timeoutInterval = 10;
 
     [[[NSURLSession sharedSession] dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
-        if (error || !data) return;
-
         NSHTTPURLResponse *httpResponse = (NSHTTPURLResponse *)response;
-        if (httpResponse.statusCode != 200) return;
-
-        NSDictionary *json = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
-        NSString *tagName = json[@"tag_name"];
-        if (![tagName isKindOfClass:NSString.class]) return;
-
-        NSString *latestVersion = [tagName hasPrefix:@"v"] ? [tagName substringFromIndex:1] : tagName;
-        if ([latestVersion compare:currentVersion options:NSNumericSearch] != NSOrderedDescending) return;
+        NSDictionary *json = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
+        NSString *tagName = [json[@"tag_name"] isKindOfClass:NSString.class] ? json[@"tag_name"] : nil;
 
         dispatch_async(dispatch_get_main_queue(), ^{
             NSAlert *alert = [[NSAlert alloc] init];
+
+            if (error || httpResponse.statusCode != 200 || !tagName) {
+                alert.messageText = @"Could not check for updates";
+                alert.informativeText = @"The releases page could not be reached. Please try again later.";
+                [alert addButtonWithTitle:@"OK"];
+                [alert runModal];
+                return;
+            }
+
+            NSString *latestVersion = [tagName hasPrefix:@"v"] ? [tagName substringFromIndex:1] : tagName;
+            if ([latestVersion compare:currentVersion options:NSNumericSearch] != NSOrderedDescending) {
+                alert.messageText = @"You're up to date";
+                alert.informativeText = [NSString stringWithFormat:@"Markdown Viewer %@ is the latest version.", currentVersion];
+                [alert addButtonWithTitle:@"OK"];
+                [alert runModal];
+                return;
+            }
+
             alert.messageText = [NSString stringWithFormat:@"MDviewer %@ is available", latestVersion];
             alert.informativeText = [NSString stringWithFormat:@"You're running version %@. Would you like to download the update?", currentVersion];
             [alert addButtonWithTitle:@"Download"];
@@ -932,7 +950,7 @@ decisionHandler:(void (^)(WKNavigationActionPolicy))decisionHandler {
 - (BOOL)validateUserInterfaceItem:(id<NSValidatedUserInterfaceItem>)item {
     SEL action = item.action;
 
-    if (action == @selector(openDocument:)) {
+    if (action == @selector(openDocument:) || action == @selector(checkForUpdates:)) {
         return YES;
     }
 

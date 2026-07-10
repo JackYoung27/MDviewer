@@ -47,7 +47,7 @@ MDviewer is different:
 - **Secure** — HTML sanitized with [DOMPurify](https://github.com/cure53/DOMPurify), strict Content Security Policy
 - **Finder integration** — registers as default `.md` handler; double-click to open
 - **Tabbed windows** — multiple documents in one window
-- **Local-first** — no network calls, no telemetry, no accounts
+- **Local-first** — no telemetry, no accounts, and no network calls except the update check you trigger yourself from the menu
 
 ## Install
 
