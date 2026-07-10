@@ -79,6 +79,11 @@ main() {
     "$LSREGISTER" -kill -seed -r -domain local -domain system -domain user >/dev/null 2>&1 || true
     "$LSREGISTER" -f "$TARGET_APP" >/dev/null
 
+    # Elect our Quick Look extension over any other Markdown previewer
+    # (e.g. QLMarkdown) already registered for the same file types.
+    "$TARGET_APP/Contents/Resources/register-quicklook-extension.sh" "$TARGET_APP" || \
+        printf 'Warning: could not elect the Quick Look extension.\n' >&2
+
     if [ "$with_mermaid_helper" -eq 1 ]; then
         install_render_helper_agent
     else

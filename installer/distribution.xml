@@ -1,13 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <installer-gui-script minSpecVersion="2">
     <title>Markdown Viewer</title>
-    <welcome file="welcome.html"/>
-    <conclusion file="conclusion.html"/>
+    <welcome file="welcome.rtf"/>
+    <conclusion file="conclusion.rtf"/>
     <options customize="always" require-scripts="false" rootVolumeOnly="true"/>
     <domains enable_localSystem="true"/>
     <choices-outline>
         <line choice="app"/>
         <line choice="default-handler"/>
+        <line choice="quicklook-preferred"/>
         <line choice="mermaid-helper"/>
     </choices-outline>
     <choice id="app"
@@ -23,6 +24,12 @@
             start_selected="true">
         <pkg-ref id="com.local.markdown-viewer.pkg.default-handler"/>
     </choice>
+    <choice id="quicklook-preferred"
+            title="Use Markdown Viewer for Quick Look previews"
+            description="If another app's Quick Look extension currently handles Markdown files (for example QLMarkdown), this makes Markdown Viewer's extension the one Finder uses when you press Space. You can change this later in System Settings &gt; General &gt; Login Items &amp; Extensions &gt; Extensions &gt; Quick Look."
+            start_selected="true">
+        <pkg-ref id="com.local.markdown-viewer.pkg.quicklook-preferred"/>
+    </choice>
     <choice id="mermaid-helper"
             title="Mermaid Quick Look helper"
             description="Renders Mermaid diagrams live in Quick Look previews, even for files never opened in the app. Adds a background item (visible under System Settings &gt; Login Items) that is started on demand by macOS and quits after 45 seconds of inactivity."
@@ -31,5 +38,6 @@
     </choice>
     <pkg-ref id="com.local.markdown-viewer.pkg.app" version="@VERSION@" onConclusion="none">app.pkg</pkg-ref>
     <pkg-ref id="com.local.markdown-viewer.pkg.default-handler" version="@VERSION@" onConclusion="none">default-handler.pkg</pkg-ref>
+    <pkg-ref id="com.local.markdown-viewer.pkg.quicklook-preferred" version="@VERSION@" onConclusion="none">quicklook-preferred.pkg</pkg-ref>
     <pkg-ref id="com.local.markdown-viewer.pkg.mermaid-helper" version="@VERSION@" onConclusion="none">mermaid-helper.pkg</pkg-ref>
 </installer-gui-script>

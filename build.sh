@@ -321,6 +321,8 @@ build_bundle() {
     cp "$SRC_DIR/set-default-handler.py" "$RESOURCES_DIR/set-default-handler.py"
     cp "$SRC_DIR/register-mermaid-helper.sh" "$RESOURCES_DIR/register-mermaid-helper.sh"
     chmod 755 "$RESOURCES_DIR/register-mermaid-helper.sh"
+    cp "$SRC_DIR/register-quicklook-extension.sh" "$RESOURCES_DIR/register-quicklook-extension.sh"
+    chmod 755 "$RESOURCES_DIR/register-quicklook-extension.sh"
     cp "$SCRIPT_DIR/LICENSE" "$RESOURCES_DIR/LICENSE"
 
     extract_npm_file "marked" "$MARKED_VERSION" "$MARKED_FILE" "$VENDOR_DIR/marked.umd.js" "$MARKED_SHA256"
@@ -415,9 +417,15 @@ build_installer() {
     mkdir -p "$root_dir/Applications"
     ditto "$APP_DIR" "$root_dir/Applications/$APP_NAME.app"
 
+    # Installer silently fails a component whose script is not executable;
+    # stage the scripts with the exec bit forced so checkout modes can't matter.
+    local scripts_dir="$pkg_dir/scripts"
+    ditto "$SCRIPT_DIR/installer/scripts" "$scripts_dir"
+    find "$scripts_dir" -type f -exec chmod 755 {} +
+
     pkgbuild --quiet \
         --root "$root_dir" \
-        --scripts "$SCRIPT_DIR/installer/scripts/app" \
+        --scripts "$scripts_dir/app" \
         --identifier "com.local.markdown-viewer.pkg.app" \
         --version "$version" \
         --install-location "/" \
@@ -425,14 +433,21 @@ build_installer() {
 
     pkgbuild --quiet \
         --nopayload \
-        --scripts "$SCRIPT_DIR/installer/scripts/default-handler" \
+        --scripts "$scripts_dir/default-handler" \
         --identifier "com.local.markdown-viewer.pkg.default-handler" \
         --version "$version" \
         "$pkg_dir/default-handler.pkg"
 
     pkgbuild --quiet \
         --nopayload \
-        --scripts "$SCRIPT_DIR/installer/scripts/mermaid-helper" \
+        --scripts "$scripts_dir/quicklook-preferred" \
+        --identifier "com.local.markdown-viewer.pkg.quicklook-preferred" \
+        --version "$version" \
+        "$pkg_dir/quicklook-preferred.pkg"
+
+    pkgbuild --quiet \
+        --nopayload \
+        --scripts "$scripts_dir/mermaid-helper" \
         --identifier "com.local.markdown-viewer.pkg.mermaid-helper" \
         --version "$version" \
         "$pkg_dir/mermaid-helper.pkg"
