@@ -6,6 +6,7 @@
 
 static NSString *const MDVErrorDomain = @"com.local.markdown-viewer";
 static NSString *const MDVPreferredFontKey = @"MDVPreferredFont";
+static NSString *const MDVDidOfferDefaultHandlerKey = @"MDVDidOfferDefaultHandler";
 static NSString *const MDVPreferredFontDidChangeNotification = @"MDVPreferredFontDidChangeNotification";
 static NSString *const MDVReleasesURL = @"https://api.github.com/repos/JackYoung27/MDviewer/releases/latest";
 static NSString *const MDVDownloadURL = @"https://github.com/JackYoung27/MDviewer/releases/latest";
@@ -831,6 +832,71 @@ decisionHandler:(void (^)(WKNavigationActionPolicy))decisionHandler {
 - (void)applicationDidFinishLaunching:(NSNotification *)notification {
     if (!self.openedFileDuringLaunch) {
         [self openDocument:nil];
+    }
+    [self offerToBecomeDefaultMarkdownViewer];
+}
+
+// The markdown content types the app declares, resolved once per launch.
+- (NSArray<UTType *> *)markdownContentTypes {
+    NSMutableArray<UTType *> *types = [NSMutableArray array];
+    NSMutableSet<NSString *> *seen = [NSMutableSet set];
+
+    UTType *declared = [UTType typeWithIdentifier:@"net.daringfireball.markdown"];
+    if (declared) {
+        [types addObject:declared];
+        [seen addObject:declared.identifier];
+    }
+    for (NSString *extension in @[@"md", @"markdown", @"mdown", @"mkd"]) {
+        UTType *type = [UTType typeWithFilenameExtension:extension];
+        if (type && ![seen containsObject:type.identifier]) {
+            [types addObject:type];
+            [seen addObject:type.identifier];
+        }
+    }
+    return types;
+}
+
+// Asked once, on the first launch where another app (usually Xcode on a
+// developer Mac) owns Markdown files.
+- (void)offerToBecomeDefaultMarkdownViewer {
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    if ([defaults boolForKey:MDVDidOfferDefaultHandlerKey]) {
+        return;
+    }
+
+    NSArray<UTType *> *types = [self markdownContentTypes];
+    if (types.count == 0) {
+        return;
+    }
+
+    NSWorkspace *workspace = [NSWorkspace sharedWorkspace];
+    NSURL *currentHandlerURL = [workspace URLForApplicationToOpenContentType:types.firstObject];
+    NSString *currentBundleID = currentHandlerURL ? [NSBundle bundleWithURL:currentHandlerURL].bundleIdentifier : nil;
+
+    [defaults setBool:YES forKey:MDVDidOfferDefaultHandlerKey];
+
+    if ([currentBundleID isEqualToString:[NSBundle mainBundle].bundleIdentifier]) {
+        return;
+    }
+
+    NSString *currentName = currentHandlerURL
+        ? [[NSFileManager defaultManager] displayNameAtPath:currentHandlerURL.path]
+        : @"another app";
+
+    NSAlert *alert = [[NSAlert alloc] init];
+    alert.messageText = @"Open Markdown files with Markdown Viewer?";
+    alert.informativeText = [NSString stringWithFormat:
+        @"Markdown files currently open in %@. Make Markdown Viewer the default so double-clicking a .md file shows a rendered preview?\n\nYou can change this anytime via Get Info in Finder.", currentName];
+    [alert addButtonWithTitle:@"Make Default"];
+    [alert addButtonWithTitle:@"Not Now"];
+
+    if ([alert runModal] != NSAlertFirstButtonReturn) {
+        return;
+    }
+
+    NSURL *appURL = [NSBundle mainBundle].bundleURL;
+    for (UTType *type in types) {
+        [workspace setDefaultApplicationAtURL:appURL toOpenContentType:type completionHandler:nil];
     }
 }
 
