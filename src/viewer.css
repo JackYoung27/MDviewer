@@ -1,4 +1,14 @@
+@font-face {
+  font-family: "Geist";
+  src: url("vendor/geist/Geist-Variable.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root {
+  --body-font: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, serif;
+  --heading-font: "SF Pro Display", "Segoe UI", sans-serif;
   --bg: #ffffff;
   --page-text: #122033;
   --muted-text: #5b6675;
@@ -34,6 +44,16 @@
   --find-match-text: #3f2d00;
   --find-active-bg: #f59e0b;
   --find-active-text: #1f1600;
+}
+
+:root[data-font="github"] {
+  --body-font: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif;
+  --heading-font: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif;
+}
+
+:root[data-font="geist"] {
+  --body-font: "Geist", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --heading-font: "Geist", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -127,7 +147,7 @@ body {
   min-height: 100vh;
   background: var(--bg);
   color: var(--page-text);
-  font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, serif;
+  font-family: var(--body-font);
 }
 
 .document {
@@ -162,7 +182,7 @@ body {
   margin-bottom: 0.5em;
   line-height: 1.2;
   color: var(--heading-text);
-  font-family: "SF Pro Display", "Segoe UI", sans-serif;
+  font-family: var(--heading-font);
 }
 
 .document h1 {

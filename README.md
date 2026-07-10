@@ -46,6 +46,7 @@ MDviewer is different:
 - **Dark mode** — follows your macOS appearance setting
 - **Secure** — HTML sanitized with [DOMPurify](https://github.com/cure53/DOMPurify), strict Content Security Policy
 - **Finder integration** — registers as default `.md` handler; double-click to open
+- **Font settings** — pick the document font in Settings (`Cmd+,`): Serif (default), GitHub, or Geist (the Next.js font, bundled)
 - **Tabbed windows** — multiple documents in one window
 - **Local-first** — no telemetry, no accounts, and no network calls except the update check you trigger yourself from the menu
 
@@ -76,6 +77,7 @@ Requires Xcode Command Line Tools (`xcode-select --install`).
 | Action | Shortcut |
 |---|---|
 | Open file | `Cmd+O` |
+| Settings | `Cmd+,` |
 | Find in document | `Cmd+F` |
 | Next match | `Cmd+G` |
 | Previous match | `Cmd+Shift+G` |

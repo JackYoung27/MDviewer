@@ -32,6 +32,10 @@ MERMAID_VERSION="11.14.0"
 MERMAID_FILE="package/dist/mermaid.min.js"
 MERMAID_SHA256="217b66ef4279c33c141b4afe22effad10a91c02558dc70917be2c0981e78ed87"
 
+GEIST_VERSION="1.7.2"
+GEIST_FILE="package/dist/fonts/geist-sans/Geist-Variable.woff2"
+GEIST_SHA256="a369fcf5628ea2aa4e1b9e2ec6a5b3624e365bda588e1f0f2f12b564f728fbb8"
+
 KATEX_VERSION="0.16.45"
 KATEX_CSS_SHA256="23aefa0850248a16478b9f55d6b67028f74cc0b46b82b24dc22af068acaa4170"
 KATEX_JS_SHA256="e1c5d9e1b5b906881c40faf67950585a3f5d5adb4636d10e9678b9ba74b57dcc"
@@ -251,6 +255,9 @@ build_bundle() {
     extract_npm_file "katex" "$KATEX_VERSION" "package/dist/contrib/auto-render.min.js" "$VENDOR_DIR/katex-auto-render.min.js" "$KATEX_AUTO_RENDER_SHA256"
     extract_npm_dir "katex" "$KATEX_VERSION" "package/dist/fonts" "$VENDOR_DIR/fonts"
     extract_npm_file "katex" "$KATEX_VERSION" "package/LICENSE" "$LICENSES_DIR/katex-LICENSE"
+    mkdir -p "$VENDOR_DIR/geist"
+    extract_npm_file "geist" "$GEIST_VERSION" "$GEIST_FILE" "$VENDOR_DIR/geist/Geist-Variable.woff2" "$GEIST_SHA256"
+    extract_npm_file "geist" "$GEIST_VERSION" "package/LICENSE.txt" "$LICENSES_DIR/geist-LICENSE.txt"
 
     chmod 755 "$RESOURCES_DIR/MarkdownViewer.sh"
     plutil -lint "$CONTENTS_DIR/Info.plist" >/dev/null
