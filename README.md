@@ -46,6 +46,7 @@ MDviewer is different:
 - **Dark mode** — follows your macOS appearance setting
 - **Secure** — HTML sanitized with [DOMPurify](https://github.com/cure53/DOMPurify), strict Content Security Policy
 - **Finder integration** — registers as default `.md` handler; double-click to open
+- **Quick Look** — press Space on a Markdown file in Finder for a rendered preview: tables, code, task lists, images, and LaTeX math included
 - **Font settings** — pick the document font in Settings (`Cmd+,`): Serif (default), GitHub, or Geist (the Next.js font, bundled)
 - **Tabbed windows** — multiple documents in one window
 - **Local-first** — no telemetry, no accounts, and no network calls except the update check you trigger yourself from the menu
