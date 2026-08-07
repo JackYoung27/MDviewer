@@ -101,6 +101,7 @@
   function applyRenderedContent() {
     contentEl.innerHTML = renderedContentHtml || "<p></p>";
     disableTaskCheckboxes(contentEl);
+    assignHeadingIds(contentEl);
     finalizeLinks(contentEl);
     finalizeImages(contentEl);
     renderMermaidDiagrams(contentEl);
@@ -384,6 +385,46 @@
     baseEl.href = baseUrl;
   }
 
+  function slugifyHeadingText(text) {
+    return (text || "")
+      .toLowerCase()
+      .trim()
+      .replace(/[^\w\- ]+/g, "")
+      .replace(/\s+/g, "-");
+  }
+
+  function assignHeadingIds(root) {
+    const usedSlugs = new Map();
+    const headings = root.querySelectorAll("h1, h2, h3, h4, h5, h6");
+
+    for (const heading of headings) {
+      const baseSlug = slugifyHeadingText(heading.textContent);
+      if (!baseSlug) {
+        continue;
+      }
+
+      const count = usedSlugs.get(baseSlug) || 0;
+      usedSlugs.set(baseSlug, count + 1);
+
+      heading.id = count === 0 ? baseSlug : `${baseSlug}-${count}`;
+    }
+  }
+
+  function scrollToHash(hash) {
+    const id = (hash || "").replace(/^#/, "");
+    if (!id) {
+      return false;
+    }
+
+    const target = document.getElementById(id) || document.getElementById(decodeURIComponent(id));
+    if (!target) {
+      return false;
+    }
+
+    target.scrollIntoView({ behavior: "auto", block: "start" });
+    return true;
+  }
+
   function finalizeLinks(root) {
     const anchors = root.querySelectorAll("a[href]");
 
@@ -393,6 +434,17 @@
       if (/^https?:\/\//i.test(href)) {
         anchor.setAttribute("target", "_blank");
         anchor.setAttribute("rel", "noopener noreferrer");
+      } else if (href.startsWith("#")) {
+        // A <base href> pointing at the source document's real directory is applied
+        // for resolving relative asset/document links. That same <base> hijacks bare
+        // "#fragment" hrefs, resolving them against the source directory instead of
+        // the current preview page, which WKWebView then refuses as a real navigation
+        // outside its sandboxed read access. Handle same-page anchors ourselves so
+        // they never reach WebKit's navigation/sandbox path.
+        anchor.addEventListener("click", (event) => {
+          event.preventDefault();
+          scrollToHash(href);
+        });
       }
     }
   }
