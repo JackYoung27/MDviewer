@@ -102,6 +102,7 @@
   function applyRenderedContent() {
     contentEl.innerHTML = renderedContentHtml || "<p></p>";
     disableTaskCheckboxes(contentEl);
+    assignHeadingIds(contentEl);
     finalizeLinks(contentEl);
     finalizeImages(contentEl);
     renderMermaidDiagrams(contentEl);
@@ -384,6 +385,45 @@
     }
 
     baseEl.href = baseUrl;
+  }
+
+  // A <base href> pointing at the source file's real directory is applied
+  // (see applyBaseUrl) so relative image/document links resolve correctly.
+  // That same <base> also resolves bare "#fragment" hrefs against that
+  // directory instead of the current preview page, so WKWebView sees a
+  // real navigation to a path it was never granted sandbox read access to
+  // and refuses it. Give headings ids and handle same-page "#..." clicks
+  // ourselves so they never reach WebKit's navigation path.
+  function slugifyHeadingText(text) {
+    return (text || "")
+      .toLowerCase()
+      .trim()
+      .replace(/[^\w\- ]+/g, "")
+      .replace(/\s+/g, "-");
+  }
+
+  function assignHeadingIds(root) {
+    const seen = new Map();
+
+    for (const heading of root.querySelectorAll("h1, h2, h3, h4, h5, h6")) {
+      const slug = slugifyHeadingText(heading.textContent);
+      if (!slug) continue;
+
+      const count = seen.get(slug) || 0;
+      seen.set(slug, count + 1);
+      heading.id = count === 0 ? slug : `${slug}-${count}`;
+    }
+  }
+
+  function handleFragmentLinkClick(event) {
+    const anchor = event.target.closest('a[href^="#"]');
+    if (!anchor) return;
+
+    event.preventDefault();
+    const target = document.getElementById(anchor.getAttribute("href").slice(1));
+    if (target) {
+      target.scrollIntoView({ behavior: "auto", block: "start" });
+    }
   }
 
   function finalizeLinks(root) {
@@ -1109,6 +1149,8 @@
   window.mdvFindNextMatch = () => jumpToSearchMatch(1);
   window.mdvFindPreviousMatch = () => jumpToSearchMatch(-1);
   window.mdvCloseFindBar = closeFindBar;
+
+  contentEl.addEventListener("click", handleFragmentLinkClick);
 
   createSearchPanel();
   createToggleButton();
