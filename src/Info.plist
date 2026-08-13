@@ -9,9 +9,9 @@
     <key>CFBundleIdentifier</key>
     <string>com.local.markdown-viewer</string>
     <key>CFBundleVersion</key>
-    <string>2.4.6</string>
+    <string>2.5.0</string>
     <key>CFBundleShortVersionString</key>
-    <string>2.4.6</string>
+    <string>2.5.0</string>
     <key>CFBundleExecutable</key>
     <string>MarkdownViewer</string>
     <key>CFBundleIconFile</key>
@@ -46,6 +46,26 @@
                 <string>text/markdown</string>
             </dict>
         </dict>
+        <dict>
+            <key>UTTypeIdentifier</key>
+            <string>org.yaml.yaml</string>
+            <key>UTTypeDescription</key>
+            <string>YAML document</string>
+            <key>UTTypeConformsTo</key>
+            <array>
+                <string>public.plain-text</string>
+            </array>
+            <key>UTTypeTagSpecification</key>
+            <dict>
+                <key>public.filename-extension</key>
+                <array>
+                    <string>yaml</string>
+                    <string>yml</string>
+                </array>
+                <key>public.mime-type</key>
+                <string>application/yaml</string>
+            </dict>
+        </dict>
     </array>
     <key>CFBundleDocumentTypes</key>
     <array>
@@ -66,6 +86,39 @@
                 <string>markdown</string>
                 <string>mdown</string>
                 <string>mkd</string>
+            </array>
+        </dict>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>JSON Document</string>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>LSHandlerRank</key>
+            <string>Alternate</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>public.json</string>
+            </array>
+            <key>CFBundleTypeExtensions</key>
+            <array>
+                <string>json</string>
+            </array>
+        </dict>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>YAML Document</string>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>LSHandlerRank</key>
+            <string>Alternate</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>org.yaml.yaml</string>
+            </array>
+            <key>CFBundleTypeExtensions</key>
+            <array>
+                <string>yaml</string>
+                <string>yml</string>
             </array>
         </dict>
     </array>

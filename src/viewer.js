@@ -11,6 +11,7 @@
     countEl: null,
   };
   let renderedContentHtml = "";
+  let renderedRawContent = "";
   let renderedDocumentTitle = document.title;
   let mermaidRenderGeneration = 0;
 
@@ -106,6 +107,7 @@
     renderMermaidDiagrams(contentEl);
     renderMath(contentEl);
     setupCodeBlockCopy(contentEl);
+    setupDirectEditableSurface();
     document.title = renderedDocumentTitle;
   }
 
@@ -276,7 +278,7 @@
   }
 
   function openFindBar() {
-    if (!searchState.panelEl) return;
+    if (!searchState.panelEl || editState.active) return;
     searchState.panelEl.classList.add("find-panel--visible");
     searchState.inputEl.focus();
     searchState.inputEl.select();
@@ -417,6 +419,10 @@
   function isMermaidCodeBlock(code) {
     const className = code.className || "";
     return /\b(language-mermaid|mermaid)\b/.test(className);
+  }
+
+  function isPlainDocumentCodeBlock(code) {
+    return code.classList.contains("doc-plain__code");
   }
 
   function configureMermaid() {
@@ -595,26 +601,21 @@
     return element.contains(selection.anchorNode) || element.contains(selection.focusNode);
   }
 
+  const CODE_COPY_LABELS = {
+    ready: "Copy code",
+    copied: "Copied",
+    failed: "Copy failed — try again",
+  };
+
   function setCodeBlockCopyState(pre, state) {
     pre.dataset.copyState = state;
     const button = pre.querySelector(".code-copy-button");
-    const label = button ? button.querySelector(".code-copy-button__label") : null;
-    const status = button ? button.querySelector(".code-copy-button__status") : null;
+    if (!button) return;
 
-    if (button) {
-      button.dataset.copyState = state;
-    }
-
-    if (state === "copied") {
-      if (label) label.textContent = "Copied";
-      if (status) status.textContent = "Ready to paste";
-    } else if (state === "failed") {
-      if (label) label.textContent = "Copy failed";
-      if (status) status.textContent = "Try again";
-    } else {
-      if (label) label.textContent = "Copy code";
-      if (status) status.textContent = "";
-    }
+    button.dataset.copyState = state;
+    const label = CODE_COPY_LABELS[state] || CODE_COPY_LABELS.ready;
+    button.setAttribute("aria-label", label);
+    button.title = label;
   }
 
   function flashCodeBlockCopyState(pre, state) {
@@ -668,7 +669,7 @@
     const codeBlocks = root.querySelectorAll("pre > code");
 
     for (const code of codeBlocks) {
-      if (isMermaidCodeBlock(code)) continue;
+      if (isMermaidCodeBlock(code) || isPlainDocumentCodeBlock(code)) continue;
 
       const pre = code.parentElement;
       if (!pre) continue;
@@ -678,20 +679,8 @@
       const button = document.createElement("button");
       button.className = "code-copy-button";
       button.type = "button";
-      button.setAttribute("aria-label", "Copy code block");
 
-      const text = document.createElement("span");
-      text.className = "code-copy-button__text";
-
-      const label = document.createElement("span");
-      label.className = "code-copy-button__label";
-
-      const status = document.createElement("span");
-      status.className = "code-copy-button__status";
-      status.setAttribute("aria-hidden", "true");
-
-      text.append(label, status);
-      button.append(createCopyIcon(), text);
+      button.append(createCopyIcon());
       pre.prepend(button);
       setCodeBlockCopyState(pre, "ready");
 
@@ -703,6 +692,354 @@
           copyCodeBlock(pre, code);
         }
       });
+    }
+  }
+
+  // --- JSON / YAML rendering -------------------------------------------
+
+  function escapeHtml(value) {
+    return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+
+  function highlightJSON(text) {
+    const escaped = escapeHtml(text);
+    return escaped.replace(
+      /("(?:\\u[\da-fA-F]{4}|\\[^u]|[^\\"])*"(\s*:)?)|\b(true|false|null)\b|(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)/g,
+      (match, str, colon, literal) => {
+        if (str) return `<span class="${colon ? "tok-key" : "tok-string"}">${match}</span>`;
+        if (literal) return `<span class="${literal === "null" ? "tok-null" : "tok-bool"}">${match}</span>`;
+        return `<span class="tok-number">${match}</span>`;
+      }
+    );
+  }
+
+  function highlightYAMLScalar(value) {
+    if (!value) return "";
+    let tokenClass = "tok-string";
+    if (/^(true|false)$/i.test(value)) tokenClass = "tok-bool";
+    else if (/^(null|~)$/i.test(value)) tokenClass = "tok-null";
+    else if (/^-?\d+(\.\d+)?([eE][+-]?\d+)?$/.test(value)) tokenClass = "tok-number";
+    return `<span class="${tokenClass}">${escapeHtml(value)}</span>`;
+  }
+
+  function highlightYAMLValue(rest) {
+    if (!rest) return "";
+    const match = rest.match(/^(\s+)(.*)$/);
+    if (!match) return escapeHtml(rest);
+    return `${match[1]}${highlightYAMLScalar(match[2])}`;
+  }
+
+  function highlightYAMLLine(line) {
+    const commentMatch = line.match(/^(\s*)#(.*)$/);
+    if (commentMatch) {
+      return `${commentMatch[1]}<span class="tok-comment">#${escapeHtml(commentMatch[2])}</span>`;
+    }
+
+    const kvMatch = line.match(/^(\s*(?:-\s+)?)([^:\n]+?):(\s.*|)$/);
+    if (kvMatch) {
+      const [, prefix, key, rest] = kvMatch;
+      return `${escapeHtml(prefix)}<span class="tok-key">${escapeHtml(key)}</span>:${highlightYAMLValue(rest)}`;
+    }
+
+    const listMatch = line.match(/^(\s*-\s+)(.*)$/);
+    if (listMatch) {
+      return `${escapeHtml(listMatch[1])}${highlightYAMLScalar(listMatch[2])}`;
+    }
+
+    return escapeHtml(line);
+  }
+
+  function highlightYAML(text) {
+    return text.split("\n").map(highlightYAMLLine).join("\n");
+  }
+
+  // Never reformats — only decorates the raw text with color. Re-serializing
+  // JSON via JSON.stringify on every render (e.g. after each save) would
+  // silently discard blank lines and whitespace the user just typed, which
+  // is exactly the kind of surprise a "click to edit and save" view must not do.
+  function buildDataDocumentHtml(kind, rawText) {
+    if (kind === "json") {
+      let bannerHtml = "";
+
+      try {
+        JSON.parse(rawText);
+      } catch (error) {
+        bannerHtml = `<p class="document__error doc-parse-error">Invalid JSON: ${escapeHtml(error.message)}</p>`;
+      }
+
+      return `${bannerHtml}<pre class="doc-plain"><code class="doc-plain__code language-json">${highlightJSON(rawText)}</code></pre>`;
+    }
+
+    return `<pre class="doc-plain"><code class="doc-plain__code language-yaml">${highlightYAML(rawText)}</code></pre>`;
+  }
+
+  // --- Editing & saving ---------------------------------------------------
+
+  const editState = {
+    active: false,
+    kind: "markdown",
+    textareaEl: null,
+    pendingKind: null,
+    pendingValue: null,
+  };
+
+  let toastEl = null;
+  let toastHideTimer = 0;
+
+  function showToast(message, tone, autoHideMs) {
+    if (!toastEl) {
+      toastEl = document.createElement("p");
+      toastEl.className = "doc-toast";
+      toastEl.setAttribute("aria-live", "polite");
+      document.body.appendChild(toastEl);
+    }
+
+    toastEl.textContent = message;
+    toastEl.dataset.tone = tone || "";
+    toastEl.classList.add("doc-toast--visible");
+
+    window.clearTimeout(toastHideTimer);
+    if (autoHideMs) {
+      toastHideTimer = window.setTimeout(() => {
+        toastEl.classList.remove("doc-toast--visible");
+      }, autoHideMs);
+    }
+  }
+
+  function canSaveViaBridge() {
+    return !!(window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.mdvSaveBridge);
+  }
+
+  function sanitizeMarkdown(source) {
+    return window.DOMPurify.sanitize(window.marked.parse(source || "", { gfm: true, breaks: true }), {
+      USE_PROFILES: { html: true },
+      ALLOW_UNKNOWN_PROTOCOLS: false,
+      FORBID_TAGS: ["script", "style"],
+      FORBID_ATTR: ["style"],
+    });
+  }
+
+  // Markdown: click into the preview to swap to a raw-source editor. Markdown
+  // rendering discards the literal syntax (headings lose their `#`, etc.), so
+  // editing the rendered HTML directly could not be saved back losslessly —
+  // the raw-source swap is what guarantees the file on disk never gets corrupted.
+  function enterEditMode() {
+    if (editState.active) return;
+
+    closeFindBar();
+    editState.active = true;
+
+    const textarea = document.createElement("textarea");
+    textarea.className = "doc-editor";
+    textarea.value = renderedRawContent;
+    textarea.spellcheck = false;
+    textarea.setAttribute("aria-label", "Edit document source — Esc to discard, ⌘S to save");
+    textarea.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        exitEditMode();
+      } else if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
+        event.preventDefault();
+        requestSave("markdown", textarea.value);
+      }
+    });
+
+    contentEl.innerHTML = "";
+    contentEl.appendChild(textarea);
+    editState.textareaEl = textarea;
+
+    textarea.focus();
+  }
+
+  function exitEditMode() {
+    editState.active = false;
+    editState.textareaEl = null;
+    applyRenderedContent();
+  }
+
+  function handleContentClick(event) {
+    if (editState.active) return;
+    if (event.target.closest("a, button")) return;
+    if (window.getSelection().toString().length > 0) return;
+
+    enterEditMode();
+  }
+
+  // JSON / YAML: the highlighted view is textually identical to the raw
+  // source (spans only decorate, never add or remove characters), so it can
+  // be edited directly in place with no separate raw/rendered mode at all.
+  // execCommand("insertText") is unreliable for inserting literal characters
+  // (e.g. "\n") into a contenteditable in WKWebView — confirmed by hand: it
+  // silently drops a bare "\n" — so newline/paste insert a real text node
+  // directly via the Selection/Range API instead.
+  function insertPlainTextAtCursor(text) {
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0) return;
+
+    const range = selection.getRangeAt(0);
+    range.deleteContents();
+
+    const node = document.createTextNode(text);
+    range.insertNode(node);
+
+    range.setStartAfter(node);
+    range.setEndAfter(node);
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }
+
+  function placeCursorAtEnd(element) {
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    range.collapse(false);
+
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }
+
+  // Manual Range edits (above) bypass WKWebView's own edit-command pipeline,
+  // so they never reach its native undo manager — confirmed by hand: ⌘Z does
+  // not revert them, even though ⌘Z does reach this keydown listener despite
+  // the app's Edit-menu key equivalent for Undo. Untracked edits are worse
+  // than no undo at all (⌘Z silently doing nothing looks broken), so this
+  // surface keeps its own small history instead of relying on the native one.
+  function createEditHistory(surface) {
+    const past = [];
+    const future = [];
+    let burstTimer = 0;
+
+    function snapshotIfNewBurst() {
+      if (burstTimer === 0) {
+        past.push(surface.innerHTML);
+        if (past.length > 200) past.shift();
+        future.length = 0;
+      }
+      window.clearTimeout(burstTimer);
+      burstTimer = window.setTimeout(() => {
+        burstTimer = 0;
+      }, 500);
+    }
+
+    function restore(fromStack, toStack) {
+      if (fromStack.length === 0) return;
+      window.clearTimeout(burstTimer);
+      burstTimer = 0;
+      toStack.push(surface.innerHTML);
+      surface.innerHTML = fromStack.pop();
+      placeCursorAtEnd(surface);
+    }
+
+    return {
+      recordBeforeChange: snapshotIfNewBurst,
+      undo: () => restore(past, future),
+      redo: () => restore(future, past),
+    };
+  }
+
+  function setupDirectEditableSurface() {
+    if (editState.kind !== "json" && editState.kind !== "yaml") return;
+
+    const surface = contentEl.querySelector(".doc-plain");
+    if (!surface) return;
+
+    surface.contentEditable = "true";
+    surface.spellcheck = false;
+    surface.setAttribute("aria-label", "Edit document — Esc to discard, ⌘S to save, ⌘Z to undo");
+
+    const history = createEditHistory(surface);
+
+    surface.addEventListener("beforeinput", () => history.recordBeforeChange());
+
+    surface.addEventListener("keydown", (event) => {
+      const meta = event.metaKey || event.ctrlKey;
+
+      if (event.key === "Escape") {
+        event.preventDefault();
+        surface.blur();
+        applyRenderedContent();
+      } else if (meta && event.key.toLowerCase() === "s") {
+        event.preventDefault();
+        requestSave(editState.kind, surface.textContent);
+      } else if (meta && event.key.toLowerCase() === "z") {
+        event.preventDefault();
+        if (event.shiftKey) {
+          history.redo();
+        } else {
+          history.undo();
+        }
+      } else if (event.key === "Enter") {
+        event.preventDefault();
+        history.recordBeforeChange();
+        insertPlainTextAtCursor("\n");
+      }
+    });
+
+    surface.addEventListener("paste", (event) => {
+      event.preventDefault();
+      history.recordBeforeChange();
+      const text = (event.clipboardData || window.clipboardData).getData("text/plain");
+      insertPlainTextAtCursor(text);
+    });
+  }
+
+  function requestSave(kind, value) {
+    if (kind === "json") {
+      try {
+        JSON.parse(value);
+      } catch (error) {
+        showToast(`Invalid JSON — ${error.message}`, "error", 3200);
+        return;
+      }
+    }
+
+    if (!canSaveViaBridge()) {
+      showToast("Saving is only available inside the app.", "error", 3200);
+      return;
+    }
+
+    editState.pendingKind = kind;
+    editState.pendingValue = value;
+    showToast("Saving…", "", 0);
+    window.webkit.messageHandlers.mdvSaveBridge.postMessage({ action: "save", content: value });
+  }
+
+  function handleSaveResult(success, message) {
+    if (editState.pendingValue === null) return;
+
+    if (!success) {
+      showToast(message || "Could not save the file.", "error", 3200);
+      return;
+    }
+
+    renderedRawContent = editState.pendingValue;
+    const kind = editState.pendingKind;
+    editState.pendingKind = null;
+    editState.pendingValue = null;
+
+    try {
+      renderedContentHtml = kind === "markdown" ? sanitizeMarkdown(renderedRawContent) : buildDataDocumentHtml(kind, renderedRawContent);
+    } catch (error) {
+      console.error(error);
+    }
+
+    if (kind === "markdown") {
+      exitEditMode();
+    } else {
+      applyRenderedContent();
+    }
+
+    showToast(message || "Saved", "success", 1400);
+  }
+
+  window.mdvOnSaveResult = handleSaveResult;
+
+  function initEditing(payload) {
+    editState.kind = payload.kind;
+    renderedRawContent = payload.content || "";
+
+    if (payload.kind === "markdown") {
+      contentEl.addEventListener("click", handleContentClick);
     }
   }
 
@@ -729,7 +1066,8 @@
       filename: decodeBase64Utf8(rawPayload.filename),
       sourcePath: decodeBase64Utf8(rawPayload.sourcePath),
       baseUrl: decodeBase64Utf8(rawPayload.baseUrl),
-      markdown: decodeBase64Utf8(rawPayload.markdown),
+      kind: rawPayload.kind === "json" || rawPayload.kind === "yaml" ? rawPayload.kind : "markdown",
+      content: decodeBase64Utf8(rawPayload.content),
     };
   } catch (error) {
     console.error(error);
@@ -739,35 +1077,31 @@
   }
 
   applyBaseUrl(payload.baseUrl);
+  initEditing(payload);
 
   document.title = payload.filename || document.title;
 
+  renderedDocumentTitle = payload.filename || document.title;
+
   try {
-    const renderedHtml = window.marked.parse(payload.markdown || "", {
-      gfm: true,
-      breaks: true,
-    });
+    if (payload.kind === "json" || payload.kind === "yaml") {
+      renderedContentHtml = buildDataDocumentHtml(payload.kind, payload.content || "");
+    } else {
+      renderedContentHtml = sanitizeMarkdown(payload.content) || "<p></p>";
+    }
 
-    const sanitizedHtml = window.DOMPurify.sanitize(renderedHtml, {
-      USE_PROFILES: { html: true },
-      ALLOW_UNKNOWN_PROTOCOLS: false,
-      FORBID_TAGS: ["script", "style"],
-      FORBID_ATTR: ["style"],
-    });
-
-    renderedContentHtml = sanitizedHtml || "<p></p>";
     applyRenderedContent();
 
-    const firstHeading = contentEl.querySelector("h1");
-    if (firstHeading && firstHeading.textContent.trim()) {
-      renderedDocumentTitle = firstHeading.textContent.trim();
-      document.title = renderedDocumentTitle;
-    } else {
-      renderedDocumentTitle = payload.filename || document.title;
+    if (payload.kind === "markdown") {
+      const firstHeading = contentEl.querySelector("h1");
+      if (firstHeading && firstHeading.textContent.trim()) {
+        renderedDocumentTitle = firstHeading.textContent.trim();
+        document.title = renderedDocumentTitle;
+      }
     }
   } catch (error) {
     console.error(error);
-    setError("Markdown preview failed to render.");
+    setError(`${payload.kind === "markdown" ? "Markdown" : payload.kind.toUpperCase()} preview failed to render.`);
   }
 
   window.mdvOpenFindBar = openFindBar;

@@ -45,7 +45,9 @@ MDviewer is different:
 - **LaTeX math** — renders inline `$...$` and block `$$...$$` math with bundled KaTeX
 - **Dark mode** — follows your macOS appearance setting
 - **Secure** — HTML sanitized with [DOMPurify](https://github.com/cure53/DOMPurify), strict Content Security Policy
-- **Finder integration** — registers as default `.md` handler; double-click to open
+- **Finder integration** — registers as default `.md` handler; opens `.json`/`.yaml`/`.yml` from Open With
+- **JSON & YAML viewing** — syntax-colored, alongside Markdown
+- **Edit in place** — click into JSON/YAML to edit directly in the colored view (Markdown edits via a raw-source view); `Cmd+S` saves straight back to the file, `Esc` discards, `Cmd+Z` undoes
 - **Tabbed windows** — multiple documents in one window
 - **Local-first** — no network calls, no telemetry, no accounts
 
@@ -83,6 +85,9 @@ Requires Xcode Command Line Tools (`xcode-select --install`).
 | Print | `Cmd+P` |
 | Export PDF | `Cmd+Shift+E` |
 | Close window | `Cmd+W` |
+| Save edit (while editing) | `Cmd+S` |
+| Discard edit (while editing) | `Esc` |
+| Undo / redo edit | `Cmd+Z` / `Cmd+Shift+Z` |
 
 ## Screenshots
 

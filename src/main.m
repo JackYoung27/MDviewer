@@ -7,17 +7,17 @@ static NSString *const MDVErrorDomain = @"com.local.markdown-viewer";
 static NSString *const MDVReleasesURL = @"https://api.github.com/repos/JackYoung27/MDviewer/releases/latest";
 static NSString *const MDVDownloadURL = @"https://github.com/JackYoung27/MDviewer/releases/latest";
 
-static NSSet<NSString *> *MDVMarkdownExtensions(void) {
+static NSSet<NSString *> *MDVSupportedExtensions(void) {
     static NSSet<NSString *> *extensions;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
-        extensions = [NSSet setWithObjects:@"md", @"markdown", @"mdown", @"mkd", nil];
+        extensions = [NSSet setWithObjects:@"md", @"markdown", @"mdown", @"mkd", @"json", @"yaml", @"yml", nil];
     });
     return extensions;
 }
 
-static BOOL MDVURLLooksLikeMarkdown(NSURL *url) {
-    return [MDVMarkdownExtensions() containsObject:url.pathExtension.lowercaseString];
+static BOOL MDVURLLooksLikeSupportedDocument(NSURL *url) {
+    return [MDVSupportedExtensions() containsObject:url.pathExtension.lowercaseString];
 }
 
 static NSError *MDVMakeError(NSInteger code, NSString *description) {
@@ -26,7 +26,34 @@ static NSError *MDVMakeError(NSInteger code, NSString *description) {
                            userInfo:@{NSLocalizedDescriptionKey: description ?: @"Unknown error."}];
 }
 
-@interface MDVPreviewWindowController : NSWindowController <NSWindowDelegate, WKNavigationDelegate, WKUIDelegate>
+static NSString *const MDVSaveMessageHandlerName = @"mdvSaveBridge";
+
+/// Forwards WKScriptMessages to its owner without the strong reference
+/// WKUserContentController would otherwise hold, which would keep the
+/// window controller (and its webView, and this handler) alive forever.
+@interface MDVWeakScriptMessageProxy : NSObject <WKScriptMessageHandler>
+@property(nonatomic, weak) id<WKScriptMessageHandler> target;
+- (instancetype)initWithTarget:(id<WKScriptMessageHandler>)target;
+@end
+
+@implementation MDVWeakScriptMessageProxy
+
+- (instancetype)initWithTarget:(id<WKScriptMessageHandler>)target {
+    self = [super init];
+    if (self) {
+        _target = target;
+    }
+    return self;
+}
+
+- (void)userContentController:(WKUserContentController *)userContentController
+       didReceiveScriptMessage:(WKScriptMessage *)message {
+    [self.target userContentController:userContentController didReceiveScriptMessage:message];
+}
+
+@end
+
+@interface MDVPreviewWindowController : NSWindowController <NSWindowDelegate, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler>
 
 @property(nonatomic, copy) void (^closeHandler)(void);
 @property(nonatomic, strong) WKWebView *webView;
@@ -38,6 +65,7 @@ static NSError *MDVMakeError(NSInteger code, NSString *description) {
 @property(nonatomic, assign) CGFloat pendingScrollTop;
 @property(nonatomic, assign) CGFloat pendingScrollRatio;
 @property(nonatomic, assign) BOOL hasPendingScrollRestore;
+@property(nonatomic, strong) NSDate *lastSelfSaveAt;
 
 - (BOOL)openMarkdownFileURL:(NSURL *)fileURL error:(NSError **)error;
 - (void)reloadPreview:(id)sender;
@@ -72,6 +100,8 @@ static NSError *MDVMakeError(NSInteger code, NSString *description) {
     [window center];
 
     WKWebViewConfiguration *configuration = [[WKWebViewConfiguration alloc] init];
+    MDVWeakScriptMessageProxy *messageProxy = [[MDVWeakScriptMessageProxy alloc] initWithTarget:self];
+    [configuration.userContentController addScriptMessageHandler:messageProxy name:MDVSaveMessageHandlerName];
     self.webView = [[WKWebView alloc] initWithFrame:window.contentView.bounds configuration:configuration];
     self.webView.navigationDelegate = self;
     self.webView.UIDelegate = self;
@@ -377,6 +407,64 @@ static NSError *MDVMakeError(NSInteger code, NSString *description) {
     [[NSWorkspace sharedWorkspace] activateFileViewerSelectingURLs:@[self.sourceFileURL]];
 }
 
+- (void)callJavaScriptSaveCallbackWithSuccess:(BOOL)success message:(NSString *)message {
+    NSString *escapedMessage = [[(message ?: @"")
+        stringByReplacingOccurrencesOfString:@"\\" withString:@"\\\\"]
+        stringByReplacingOccurrencesOfString:@"'" withString:@"\\'"];
+    escapedMessage = [escapedMessage stringByReplacingOccurrencesOfString:@"\n" withString:@"\\n"];
+
+    NSString *script = [NSString stringWithFormat:
+        @"if (typeof window.mdvOnSaveResult === 'function') { window.mdvOnSaveResult(%@, '%@'); }",
+        success ? @"true" : @"false", escapedMessage];
+
+    [self.webView evaluateJavaScript:script completionHandler:nil];
+}
+
+- (void)saveDocumentContent:(NSString *)content {
+    if (!self.sourceFileURL) {
+        [self callJavaScriptSaveCallbackWithSuccess:NO message:@"No source file is open."];
+        return;
+    }
+
+    NSError *writeError = nil;
+    BOOL wrote = [content writeToURL:self.sourceFileURL
+                           atomically:YES
+                             encoding:NSUTF8StringEncoding
+                                error:&writeError];
+
+    if (!wrote) {
+        NSString *message = writeError.localizedDescription ?: @"Could not save the file.";
+        [self callJavaScriptSaveCallbackWithSuccess:NO message:message];
+        return;
+    }
+
+    // The webView already reflects this content (see handleSaveResult in
+    // viewer.js). Mark the write as self-initiated so the FSEvents watcher
+    // below doesn't reload the whole page out from under an in-progress
+    // edit a moment later.
+    self.lastSelfSaveAt = [NSDate date];
+
+    [self callJavaScriptSaveCallbackWithSuccess:YES message:@"Saved"];
+}
+
+- (void)userContentController:(WKUserContentController *)userContentController
+       didReceiveScriptMessage:(WKScriptMessage *)message {
+    if (![message.name isEqualToString:MDVSaveMessageHandlerName]) {
+        return;
+    }
+
+    NSDictionary *body = [message.body isKindOfClass:NSDictionary.class] ? (NSDictionary *)message.body : nil;
+    NSString *action = body[@"action"];
+    NSString *content = body[@"content"];
+
+    if (![action isEqualToString:@"save"] || ![content isKindOfClass:NSString.class]) {
+        [self callJavaScriptSaveCallbackWithSuccess:NO message:@"Invalid save request."];
+        return;
+    }
+
+    [self saveDocumentContent:content];
+}
+
 static void MDVFSEventCallback(ConstFSEventStreamRef streamRef,
                                void *clientCallBackInfo,
                                size_t numEvents,
@@ -389,10 +477,16 @@ static void MDVFSEventCallback(ConstFSEventStreamRef streamRef,
 
     for (NSUInteger i = 0; i < numEvents; i++) {
         NSString *changedName = paths[i].lastPathComponent;
-        if ([changedName isEqualToString:watchedName]) {
-            [controller reloadPreview:nil];
+        if (![changedName isEqualToString:watchedName]) {
+            continue;
+        }
+
+        if (controller.lastSelfSaveAt && -[controller.lastSelfSaveAt timeIntervalSinceNow] < 1.5) {
             return;
         }
+
+        [controller reloadPreview:nil];
+        return;
     }
 }
 
@@ -495,7 +589,7 @@ static void MDVFSEventCallback(ConstFSEventStreamRef streamRef,
         return;
     }
 
-    if (url.isFileURL && MDVURLLooksLikeMarkdown(url)) {
+    if (url.isFileURL && MDVURLLooksLikeSupportedDocument(url)) {
         NSError *error = nil;
         if (![self openMarkdownFileURL:url error:&error]) {
             [self presentError:error];
@@ -869,6 +963,9 @@ decisionHandler:(void (^)(WKNavigationActionPolicy))decisionHandler {
         [UTType typeWithFilenameExtension:@"markdown"],
         [UTType typeWithFilenameExtension:@"mdown"],
         [UTType typeWithFilenameExtension:@"mkd"],
+        [UTType typeWithFilenameExtension:@"json"],
+        [UTType typeWithFilenameExtension:@"yaml"],
+        [UTType typeWithFilenameExtension:@"yml"],
     ];
     panel.prompt = @"Open";
 

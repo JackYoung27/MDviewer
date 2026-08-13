@@ -35,6 +35,16 @@ safe_preview_stem() {
     printf '%s' "${stem:-preview}"
 }
 
+document_kind_for_file() {
+    local extension="${1##*.}"
+    extension="$(printf '%s' "$extension" | tr '[:upper:]' '[:lower:]')"
+    case "$extension" in
+        json) printf 'json' ;;
+        yaml|yml) printf 'yaml' ;;
+        *) printf 'markdown' ;;
+    esac
+}
+
 prepare_preview_dir() {
     local preview_dir="$1"
 
@@ -49,11 +59,12 @@ render_preview() {
     local filename="$2"
     local preview_dir="$3"
     local html_path="$preview_dir/index.html"
-    local source_path base_url
+    local source_path base_url kind
 
     source_path="$(cd "$(dirname "$input_file")" && pwd)/$(basename "$input_file")"
     base_url="$(to_file_url "$(dirname "$source_path")")"
     [ "${base_url%/}" = "$base_url" ] && base_url="$base_url/"
+    kind="$(document_kind_for_file "$filename")"
 
     cat > "$html_path" <<HTML
 <!DOCTYPE html>
@@ -73,7 +84,7 @@ render_preview() {
 </main>
 
 <script id="viewer-data" type="application/json">
-{"filename":"$(encode_string_base64 "$filename")","sourcePath":"$(encode_string_base64 "$source_path")","baseUrl":"$(encode_string_base64 "$base_url")","markdown":"$(encode_file_base64 "$input_file")"}
+{"filename":"$(encode_string_base64 "$filename")","sourcePath":"$(encode_string_base64 "$source_path")","baseUrl":"$(encode_string_base64 "$base_url")","kind":"$kind","content":"$(encode_file_base64 "$input_file")"}
 </script>
 <script src="vendor/marked.umd.js"></script>
 <script src="vendor/purify.min.js"></script>
