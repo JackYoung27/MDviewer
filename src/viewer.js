@@ -1,7 +1,10 @@
-(() => {
+(async () => {
   const contentEl = document.getElementById("content");
   const payloadEl = document.getElementById("viewer-data");
-  const decoder = new TextDecoder();
+  let assetURL = new URL("vendor/", window.location.href);
+  const libraries = new Map();
+  let renderGeneration = 0;
+  let pendingRenders = 0;
   const searchState = {
     query: "",
     matches: [],
@@ -9,6 +12,7 @@
     panelEl: null,
     inputEl: null,
     countEl: null,
+    timer: 0,
   };
   let renderedContentHtml = "";
   let renderedRawContent = "";
@@ -50,7 +54,7 @@
       localStorage.setItem("mdv-theme", mode);
     }
     updateToggleButton();
-    renderMermaidFigures(contentEl);
+    trackRendering(renderMermaidFigures(contentEl));
   }
 
   function toggleTheme() {
@@ -71,7 +75,7 @@
     window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", function () {
       if (getMode() !== "auto") return;
       updateToggleButton();
-      renderMermaidFigures(contentEl);
+      trackRendering(renderMermaidFigures(contentEl));
     });
   }
 
@@ -99,17 +103,52 @@
     searchState.countEl.textContent = `${searchState.activeIndex + 1} of ${searchState.matches.length}`;
   }
 
+  function loadAsset(name) {
+    if (!libraries.has(name)) {
+      libraries.set(name, new Promise((resolve, reject) => {
+        const stylesheet = name.endsWith(".css");
+        const asset = document.createElement(stylesheet ? "link" : "script");
+        if (stylesheet) { asset.rel = "stylesheet"; asset.href = new URL(name, assetURL).href; }
+        else asset.src = new URL(name, assetURL).href;
+        asset.onload = resolve;
+        asset.onerror = () => {
+          libraries.delete(name);
+          asset.remove();
+          reject(new Error(`Could not load ${name}`));
+        };
+        document.head.appendChild(asset);
+      }));
+    }
+    return libraries.get(name);
+  }
+
+  function postMessage(message) {
+    window.webkit?.messageHandlers?.mdvSaveBridge?.postMessage(message);
+  }
+
+  function trackRendering(task) {
+    const generation = renderGeneration;
+    pendingRenders++;
+    postMessage({ action: "renderStarted" });
+    Promise.resolve(task).catch(console.error).finally(() => {
+      if (generation === renderGeneration && --pendingRenders === 0) postMessage({ action: "renderReady" });
+    });
+  }
+
   function applyRenderedContent() {
+    const generation = ++renderGeneration;
+    pendingRenders = 0;
+    resetSearchHighlights();
     contentEl.innerHTML = renderedContentHtml || "<p></p>";
     disableTaskCheckboxes(contentEl);
     assignHeadingIds(contentEl);
     finalizeLinks(contentEl);
     finalizeImages(contentEl);
-    renderMermaidDiagrams(contentEl);
-    renderMath(contentEl);
     setupCodeBlockCopy(contentEl);
     setupDirectEditableSurface();
     document.title = renderedDocumentTitle;
+    trackRendering(Promise.allSettled([renderMermaidDiagrams(contentEl), renderMath(contentEl, generation)]));
+    updateDirtyState();
   }
 
   function clearSearchSelection() {
@@ -123,8 +162,16 @@
   }
 
   function resetSearchHighlights() {
+    window.clearTimeout(searchState.timer);
+    searchState.timer = 0;
+    const parents = new Set();
+    for (const mark of searchState.matches) {
+      if (!mark.parentNode) continue;
+      parents.add(mark.parentNode);
+      mark.replaceWith(document.createTextNode(mark.textContent));
+    }
+    for (const parent of parents) parent.normalize();
     clearSearchSelection();
-    applyRenderedContent();
   }
 
   function escapeRegExp(value) {
@@ -212,9 +259,7 @@
       return;
     }
 
-    for (const match of searchState.matches) {
-      match.classList.remove("find-match--active");
-    }
+    searchState.matches[searchState.activeIndex]?.classList.remove("find-match--active");
 
     const normalizedIndex = ((index % searchState.matches.length) + searchState.matches.length) % searchState.matches.length;
     const activeMatch = searchState.matches[normalizedIndex];
@@ -251,6 +296,11 @@
   }
 
   function jumpToSearchMatch(direction) {
+    if (searchState.timer) {
+      updateSearch(searchState.inputEl.value);
+      searchState.timer = 0;
+      return;
+    }
     if (!searchState.query) {
       openFindBar();
       return;
@@ -334,7 +384,10 @@
     closeButton.setAttribute("aria-label", "Close find");
     closeButton.addEventListener("click", closeFindBar);
 
-    input.addEventListener("input", () => updateSearch(input.value));
+    input.addEventListener("input", () => {
+      window.clearTimeout(searchState.timer);
+      searchState.timer = window.setTimeout(() => updateSearch(input.value), 120);
+    });
     input.addEventListener("keydown", (event) => {
       if (event.key === "Enter") {
         event.preventDefault();
@@ -360,17 +413,6 @@
     errorEl.className = "document__error";
     errorEl.textContent = message;
     contentEl.appendChild(errorEl);
-  }
-
-  function decodeBase64Utf8(value) {
-    const binary = window.atob(value || "");
-    const bytes = new Uint8Array(binary.length);
-
-    for (let index = 0; index < binary.length; index += 1) {
-      bytes[index] = binary.charCodeAt(index);
-    }
-
-    return decoder.decode(bytes);
   }
 
   function applyBaseUrl(baseUrl) {
@@ -538,6 +580,7 @@
 
       figure.classList.remove("mermaid-diagram--error");
       figure.replaceChildren(image);
+      await image.decode();
     } catch (error) {
       if (generation !== mermaidRenderGeneration) {
         return;
@@ -548,7 +591,7 @@
     }
   }
 
-  function renderMermaidFigures(root) {
+  async function renderMermaidFigures(root) {
     const figures = Array.from(root.querySelectorAll(".mermaid-diagram[data-mermaid-source]"));
     if (figures.length === 0) {
       return;
@@ -557,6 +600,16 @@
     mermaidRenderGeneration += 1;
     const generation = mermaidRenderGeneration;
 
+    try {
+      await loadAsset("mermaid.min.js");
+    } catch (error) {
+      if (generation === mermaidRenderGeneration) {
+        for (const figure of figures) setMermaidFallback(figure, figure.dataset.mermaidSource || "", error.message);
+      }
+      return;
+    }
+    if (generation !== mermaidRenderGeneration) return;
+
     if (!configureMermaid()) {
       for (const figure of figures) {
         setMermaidFallback(figure, figure.dataset.mermaidSource || "", "Mermaid renderer is unavailable.");
@@ -564,12 +617,12 @@
       return;
     }
 
-    figures.forEach((figure, index) => {
+    await Promise.all(figures.map((figure, index) => {
       const source = figure.dataset.mermaidSource || "";
       figure.classList.remove("mermaid-diagram--error");
       setMermaidStatus(figure, "Rendering diagram...");
-      renderMermaidFigure(figure, source, generation, index);
-    });
+      return renderMermaidFigure(figure, source, generation, index);
+    }));
   }
 
   function renderMermaidDiagrams(root) {
@@ -584,13 +637,19 @@
       pre.replaceWith(figure);
     }
 
-    renderMermaidFigures(root);
+    return renderMermaidFigures(root);
   }
 
-  function renderMath(root) {
-    if (!window.renderMathInElement) {
+  async function renderMath(root, generation) {
+    if (editState.kind !== "markdown" || !/\$|\\[([]/.test(renderedRawContent)) return;
+    try {
+      await Promise.all([loadAsset("katex.min.css"), loadAsset("katex.min.js")]);
+      await loadAsset("katex-auto-render.min.js");
+    } catch (error) {
+      console.error(error);
       return;
     }
+    if (generation !== renderGeneration) return;
 
     window.renderMathInElement(root, {
       delimiters: [
@@ -603,6 +662,8 @@
       ignoredClasses: ["mermaid-diagram"],
       throwOnError: false,
     });
+    root.getBoundingClientRect();
+    await document.fonts.ready;
   }
 
   async function copyTextToClipboard(text) {
@@ -793,11 +854,9 @@
     return text.split("\n").map(highlightYAMLLine).join("\n");
   }
 
-  // Never reformats — only decorates the raw text with color. Re-serializing
-  // JSON via JSON.stringify on every render (e.g. after each save) would
-  // silently discard blank lines and whitespace the user just typed, which
-  // is exactly the kind of surprise a "click to edit and save" view must not do.
+  // Highlight source text without changing its whitespace.
   function buildDataDocumentHtml(kind, rawText) {
+    const className = rawText.length > 1024 * 1024 ? "doc-plain doc-plain--large" : "doc-plain";
     if (kind === "json") {
       let bannerHtml = "";
 
@@ -807,10 +866,10 @@
         bannerHtml = `<p class="document__error doc-parse-error">Invalid JSON: ${escapeHtml(error.message)}</p>`;
       }
 
-      return `${bannerHtml}<pre class="doc-plain"><code class="doc-plain__code language-json">${highlightJSON(rawText)}</code></pre>`;
+      return `${bannerHtml}<pre class="${className}"><code class="doc-plain__code language-json">${highlightJSON(rawText)}</code></pre>`;
     }
 
-    return `<pre class="doc-plain"><code class="doc-plain__code language-yaml">${highlightYAML(rawText)}</code></pre>`;
+    return `<pre class="${className}"><code class="doc-plain__code language-yaml">${highlightYAML(rawText)}</code></pre>`;
   }
 
   // --- Editing & saving ---------------------------------------------------
@@ -829,13 +888,29 @@
     clickToEditEnabled = enabled === true;
     const surface = contentEl.querySelector(".doc-plain");
     if (surface) {
-      surface.contentEditable = String(clickToEditEnabled);
+      surface.contentEditable = String(clickToEditEnabled && editState.pendingValue === null);
       surface.setAttribute("aria-label", clickToEditEnabled
         ? "Edit document — Esc to discard, ⌘S to save, ⌘Z to undo"
         : "Document text");
     }
     // Leave an open Markdown editor intact so its unsaved text is preserved.
   };
+
+  function currentEditContent() {
+    return editState.textareaEl?.value ?? contentEl.querySelector(".doc-plain")?.textContent ?? renderedRawContent;
+  }
+
+  function updateDirtyState() {
+    postMessage({ action: "dirty", value: currentEditContent() !== renderedRawContent });
+  }
+
+  function setSaving(saving) {
+    if (editState.textareaEl) editState.textareaEl.readOnly = saving;
+    const surface = contentEl.querySelector(".doc-plain");
+    if (surface) surface.contentEditable = String(!saving && clickToEditEnabled);
+  }
+
+  window.mdvSourceChanged = () => showToast("File changed on disk. Your edits are preserved.", "", 3200);
 
   let toastEl = null;
   let toastHideTimer = 0;
@@ -873,12 +948,9 @@
     });
   }
 
-  // Markdown: click into the preview to swap to a raw-source editor. Markdown
-  // rendering discards the literal syntax (headings lose their `#`, etc.), so
-  // editing the rendered HTML directly could not be saved back losslessly —
-  // the raw-source swap is what guarantees the file on disk never gets corrupted.
+  // Edit Markdown source so saving preserves its syntax.
   function enterEditMode() {
-    if (editState.active) return;
+    if (editState.active || editState.pendingValue !== null) return;
 
     closeFindBar();
     editState.active = true;
@@ -888,7 +960,9 @@
     textarea.value = renderedRawContent;
     textarea.spellcheck = false;
     textarea.setAttribute("aria-label", "Edit document source — Esc to discard, ⌘S to save");
+    textarea.addEventListener("input", updateDirtyState);
     textarea.addEventListener("keydown", (event) => {
+      if (editState.pendingValue !== null) return;
       if (event.key === "Escape") {
         event.preventDefault();
         exitEditMode();
@@ -919,13 +993,7 @@
     enterEditMode();
   }
 
-  // JSON / YAML: the highlighted view is textually identical to the raw
-  // source (spans only decorate, never add or remove characters), so it can
-  // be edited directly in place with no separate raw/rendered mode at all.
-  // execCommand("insertText") is unreliable for inserting literal characters
-  // (e.g. "\n") into a contenteditable in WKWebView — confirmed by hand: it
-  // silently drops a bare "\n" — so newline/paste insert a real text node
-  // directly via the Selection/Range API instead.
+  // Range insertion preserves literal newlines in WKWebView.
   function insertPlainTextAtCursor(text) {
     const selection = window.getSelection();
     if (!selection || selection.rangeCount === 0) return;
@@ -952,42 +1020,65 @@
     selection.addRange(range);
   }
 
-  // Manual Range edits (above) bypass WKWebView's own edit-command pipeline,
-  // so they never reach its native undo manager — confirmed by hand: ⌘Z does
-  // not revert them, even though ⌘Z does reach this keydown listener despite
-  // the app's Edit-menu key equivalent for Undo. Untracked edits are worse
-  // than no undo at all (⌘Z silently doing nothing looks broken), so this
-  // surface keeps its own small history instead of relying on the native one.
+  // Store changed text, not whole documents, for bounded undo.
   function createEditHistory(surface) {
     const past = [];
     const future = [];
-    let burstTimer = 0;
+    const budget = 4 * 1024 * 1024;
+    let before = null;
+    let timer = 0;
 
-    function snapshotIfNewBurst() {
-      if (burstTimer === 0) {
-        past.push(surface.innerHTML);
-        if (past.length > 200) past.shift();
-        future.length = 0;
+    function push(stack, change) {
+      stack.push(change);
+      let bytes = stack.reduce((total, item) => total + (item.removed.length + item.added.length) * 2, 0);
+      while ((bytes > budget || stack.length > 200) && stack.length) {
+        const oldest = stack.shift();
+        bytes -= (oldest.removed.length + oldest.added.length) * 2;
       }
-      window.clearTimeout(burstTimer);
-      burstTimer = window.setTimeout(() => {
-        burstTimer = 0;
-      }, 500);
     }
 
-    function restore(fromStack, toStack) {
-      if (fromStack.length === 0) return;
-      window.clearTimeout(burstTimer);
-      burstTimer = 0;
-      toStack.push(surface.innerHTML);
-      surface.innerHTML = fromStack.pop();
+    function commit() {
+      window.clearTimeout(timer);
+      if (before === null) return;
+      const after = surface.textContent;
+      let start = 0;
+      let end = 0;
+      while (start < before.length && start < after.length && before.charCodeAt(start) === after.charCodeAt(start)) start++;
+      while (end < before.length - start && end < after.length - start && before.charCodeAt(before.length - end - 1) === after.charCodeAt(after.length - end - 1)) end++;
+      const removed = before.slice(start, before.length - end);
+      const added = after.slice(start, after.length - end);
+      if (removed || added) push(past, { start, removed, added });
+      before = null;
+    }
+
+    function recordBeforeChange() {
+      resetSearchHighlights();
+      if (before === null) before = surface.textContent;
+      future.length = 0;
+      window.clearTimeout(timer);
+      timer = window.setTimeout(commit, 500);
+    }
+
+    function restore(from, to, undo) {
+      commit();
+      if (!from.length) return;
+      resetSearchHighlights();
+      const change = from.pop();
+      const removed = undo ? change.added : change.removed;
+      const added = undo ? change.removed : change.added;
+      const text = surface.textContent;
+      const value = text.slice(0, change.start) + added + text.slice(change.start + removed.length);
+      const highlighted = editState.kind === "json" ? highlightJSON(value) : highlightYAML(value);
+      surface.innerHTML = `<code class="doc-plain__code language-${editState.kind}">${highlighted}</code>`;
+      push(to, change);
       placeCursorAtEnd(surface);
+      updateDirtyState();
     }
 
     return {
-      recordBeforeChange: snapshotIfNewBurst,
-      undo: () => restore(past, future),
-      redo: () => restore(future, past),
+      recordBeforeChange,
+      undo: () => restore(past, future, true),
+      redo: () => restore(future, past, false),
     };
   }
 
@@ -997,7 +1088,7 @@
     const surface = contentEl.querySelector(".doc-plain");
     if (!surface) return;
 
-    surface.contentEditable = String(clickToEditEnabled);
+    surface.contentEditable = String(clickToEditEnabled && editState.pendingValue === null);
     surface.spellcheck = false;
     surface.setAttribute("aria-label", clickToEditEnabled
       ? "Edit document — Esc to discard, ⌘S to save, ⌘Z to undo"
@@ -1006,11 +1097,12 @@
     const history = createEditHistory(surface);
 
     surface.addEventListener("beforeinput", () => history.recordBeforeChange());
+    surface.addEventListener("input", updateDirtyState);
 
     surface.addEventListener("keydown", (event) => {
       const meta = event.metaKey || event.ctrlKey;
-      // Allow saving text entered before editing was disabled.
-      if (!clickToEditEnabled && !(meta && event.key.toLowerCase() === "s")) return;
+      if (editState.pendingValue !== null) return;
+      if (!clickToEditEnabled && event.key !== "Escape" && !(meta && event.key.toLowerCase() === "s")) return;
 
       if (event.key === "Escape") {
         event.preventDefault();
@@ -1030,19 +1122,22 @@
         event.preventDefault();
         history.recordBeforeChange();
         insertPlainTextAtCursor("\n");
+        updateDirtyState();
       }
     });
 
     surface.addEventListener("paste", (event) => {
-      if (!clickToEditEnabled) return;
+      if (!clickToEditEnabled || editState.pendingValue !== null) return;
       event.preventDefault();
       history.recordBeforeChange();
       const text = (event.clipboardData || window.clipboardData).getData("text/plain");
       insertPlainTextAtCursor(text);
+      updateDirtyState();
     });
   }
 
   function requestSave(kind, value) {
+    if (editState.pendingValue !== null) return;
     if (kind === "json") {
       try {
         JSON.parse(value);
@@ -1059,6 +1154,7 @@
 
     editState.pendingKind = kind;
     editState.pendingValue = value;
+    setSaving(true);
     showToast("Saving…", "", 0);
     window.webkit.messageHandlers.mdvSaveBridge.postMessage({ action: "save", content: value });
   }
@@ -1067,6 +1163,9 @@
     if (editState.pendingValue === null) return;
 
     if (!success) {
+      editState.pendingKind = null;
+      editState.pendingValue = null;
+      setSaving(false);
       showToast(message || "Could not save the file.", "error", 3200);
       return;
     }
@@ -1075,6 +1174,7 @@
     const kind = editState.pendingKind;
     editState.pendingKind = null;
     editState.pendingValue = null;
+    setSaving(false);
 
     try {
       renderedContentHtml = kind === "markdown" ? sanitizeMarkdown(renderedRawContent) : buildDataDocumentHtml(kind, renderedRawContent);
@@ -1110,23 +1210,18 @@
     return;
   }
 
-  if (!window.marked || !window.DOMPurify) {
-    setError("Renderer assets failed to load.");
-    createToggleButton();
-    return;
-  }
-
   let payload;
 
   try {
     const rawPayload = JSON.parse(payloadEl.textContent || "{}");
 
     payload = {
-      filename: decodeBase64Utf8(rawPayload.filename),
-      sourcePath: decodeBase64Utf8(rawPayload.sourcePath),
-      baseUrl: decodeBase64Utf8(rawPayload.baseUrl),
+      assetUrl: rawPayload.assetUrl,
+      filename: rawPayload.filename || "",
+      sourcePath: rawPayload.sourcePath || "",
+      baseUrl: rawPayload.baseUrl || "",
       kind: rawPayload.kind === "json" || rawPayload.kind === "yaml" ? rawPayload.kind : "markdown",
-      content: decodeBase64Utf8(rawPayload.content),
+      content: rawPayload.content || "",
     };
   } catch (error) {
     console.error(error);
@@ -1135,6 +1230,7 @@
     return;
   }
 
+  assetURL = new URL(payload.assetUrl || "vendor/", window.location.href);
   applyBaseUrl(payload.baseUrl);
   initEditing(payload);
 
@@ -1146,6 +1242,7 @@
     if (payload.kind === "json" || payload.kind === "yaml") {
       renderedContentHtml = buildDataDocumentHtml(payload.kind, payload.content || "");
     } else {
+      await Promise.all([loadAsset("marked.umd.js"), loadAsset("purify.min.js")]);
       renderedContentHtml = sanitizeMarkdown(payload.content) || "<p></p>";
     }
 

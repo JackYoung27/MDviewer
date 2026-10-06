@@ -35,11 +35,11 @@ MDviewer is different:
 
 ## Features
 
-- **Native macOS** — Cocoa + WKWebView, launches instantly, under 1 MB
+- **Native macOS** — Cocoa + WKWebView; supports Apple Silicon and Intel
 - **Print-ready typography** — serif body, clean headings, proper spacing
 - **PDF export** — `Cmd+Shift+E` to save, `Cmd+P` to print
 - **In-document search** — `Cmd+F` finds text in the rendered Markdown, with next/previous match navigation
-- **Live reload** — re-renders automatically when the file changes on disk
+- **Live reload** — updates when the file changes on disk; preserves unsaved edits
 - **GitHub Flavored Markdown** — tables, task lists, fenced code blocks
 - **Mermaid diagrams** — renders fenced `mermaid` diagrams inline, fully local
 - **LaTeX math** — renders inline `$...$` and block `$$...$$` math with bundled KaTeX
@@ -49,7 +49,7 @@ MDviewer is different:
 - **JSON & YAML viewing** — syntax-colored, alongside Markdown
 - **Optional editing** — off by default. Enable **Markdown Viewer → Settings → Click to Edit** in the macOS menu bar. Edit JSON/YAML in the colored view or Markdown in a source view. `Cmd+S` saves, `Esc` discards, and `Cmd+Z` undoes.
 - **Tabbed windows** — multiple documents in one window
-- **Local-first** — no network calls, no telemetry, no accounts
+- **Local-first** — bundled renderers, no accounts or telemetry. Checks GitHub for updates on launch. Remote images load when a document references them.
 
 ## Install
 
@@ -81,7 +81,13 @@ To enable editing, select **Markdown Viewer → Settings → Click to Edit** in 
 
 Editing is off by default, so you can select and copy text without entering edit mode. The setting applies to all open documents and is saved across app restarts. It controls Markdown, JSON, and YAML editing.
 
-Turning editing off preserves unsaved text. An open Markdown editor stays open until you save or discard it. For JSON/YAML, turn editing on again to continue an unfinished edit.
+Turning editing off preserves unsaved text. An open Markdown editor stays open until you save or discard it. For JSON/YAML, turn editing on again to continue an unfinished edit, or press `Esc` to discard it.
+
+## Performance
+
+Files load and save in the background. Find updates highlights without rebuilding the document. Diagram and math libraries load only when needed. Undo stores text changes within a memory limit. Large JSON/YAML files use horizontal scrolling; printed output wraps long lines.
+
+Reloading, changing documents, closing, or quitting prompts before discarding unsaved edits. Saving prompts before replacing a file changed by another app.
 
 ## Keyboard Shortcuts
 

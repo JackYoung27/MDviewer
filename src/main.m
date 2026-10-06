@@ -67,15 +67,22 @@ static NSString *const MDVSaveMessageHandlerName = @"mdvSaveBridge";
 @property(nonatomic, assign) CGFloat pendingScrollTop;
 @property(nonatomic, assign) CGFloat pendingScrollRatio;
 @property(nonatomic, assign) BOOL hasPendingScrollRestore;
-@property(nonatomic, strong) NSDate *lastSelfSaveAt;
+@property(nonatomic, copy) NSString *sourceSnapshot;
+@property(nonatomic, strong) NSURL *previewDirectoryURL;
+@property(nonatomic, assign) NSUInteger loadGeneration;
+@property(nonatomic, assign) BOOL dirty;
+@property(nonatomic, assign) BOOL saving;
+@property(nonatomic, assign) BOOL closed;
+@property(nonatomic, assign) BOOL sourceChangeNotified;
 
-- (BOOL)openMarkdownFileURL:(NSURL *)fileURL error:(NSError **)error;
+- (BOOL)openDocumentFileURL:(NSURL *)fileURL;
 - (void)reloadPreview:(id)sender;
 - (void)printDocument:(id)sender;
 - (void)exportPDF:(id)sender;
 - (void)openPDFInDefaultApp:(id)sender;
 - (void)revealSourceFile:(id)sender;
 - (BOOL)hasLoadedDocument;
+- (BOOL)confirmDiscardChanges;
 
 @end
 
@@ -108,6 +115,8 @@ static NSString *const MDVSaveMessageHandlerName = @"mdvSaveBridge";
         initWithSource:editingScript injectionTime:WKUserScriptInjectionTimeAtDocumentStart forMainFrameOnly:YES]];
     MDVWeakScriptMessageProxy *messageProxy = [[MDVWeakScriptMessageProxy alloc] initWithTarget:self];
     [configuration.userContentController addScriptMessageHandler:messageProxy name:MDVSaveMessageHandlerName];
+    self.previewDirectoryURL = [[NSFileManager defaultManager].temporaryDirectory
+        URLByAppendingPathComponent:[@"mdviewer-" stringByAppendingString:NSUUID.UUID.UUIDString] isDirectory:YES];
     self.webView = [[WKWebView alloc] initWithFrame:window.contentView.bounds configuration:configuration];
     self.webView.navigationDelegate = self;
     self.webView.UIDelegate = self;
@@ -131,70 +140,48 @@ static NSString *const MDVSaveMessageHandlerName = @"mdvSaveBridge";
     self.hasPendingScrollRestore = NO;
 }
 
-- (NSURL *)rendererScriptURL {
-    NSBundle *bundle = [NSBundle mainBundle];
-    return [bundle URLForResource:@"MarkdownViewer" withExtension:@"sh"];
+- (BOOL)confirmDiscardChanges {
+    if (self.saving) { NSBeep(); return NO; }
+    if (!self.dirty) return YES;
+    NSAlert *alert = [[NSAlert alloc] init];
+    alert.messageText = @"Discard unsaved changes?";
+    alert.informativeText = self.sourceFileURL.lastPathComponent;
+    [alert addButtonWithTitle:@"Keep Editing"];
+    [alert addButtonWithTitle:@"Discard"];
+    return [alert runModal] == NSAlertSecondButtonReturn;
 }
 
-- (NSURL *)previewHTMLURLForFileURL:(NSURL *)fileURL error:(NSError **)error {
-    NSURL *scriptURL = [self rendererScriptURL];
-
-    if (!scriptURL) {
-        if (error) {
-            *error = MDVMakeError(10, @"The preview generator is missing from the app bundle.");
-        }
+- (NSURL *)previewHTMLURLForFileURL:(NSURL *)fileURL content:(NSString **)content error:(NSError **)error {
+    NSString *source = [NSString stringWithContentsOfURL:fileURL encoding:NSUTF8StringEncoding error:error];
+    if (!source) return nil;
+    NSURL *templateURL = [[NSBundle mainBundle] URLForResource:@"viewer" withExtension:@"html"];
+    NSString *html = templateURL ? [NSString stringWithContentsOfURL:templateURL encoding:NSUTF8StringEncoding error:error] : nil;
+    if (!html) {
+        if (error && !*error) *error = MDVMakeError(10, @"The preview template is missing.");
         return nil;
     }
-
-    NSTask *task = [[NSTask alloc] init];
-    NSPipe *stdoutPipe = [NSPipe pipe];
-    NSPipe *stderrPipe = [NSPipe pipe];
-    NSError *launchError = nil;
-
-    task.executableURL = scriptURL;
-    task.arguments = @[fileURL.path];
-    task.standardOutput = stdoutPipe;
-    task.standardError = stderrPipe;
-
-    if (![task launchAndReturnError:&launchError]) {
-        if (error) {
-            *error = launchError ?: MDVMakeError(11, @"Could not start the preview generator.");
-        }
-        return nil;
-    }
-
-    [task waitUntilExit];
-
-    NSData *stdoutData = [[stdoutPipe fileHandleForReading] readDataToEndOfFile];
-    NSData *stderrData = [[stderrPipe fileHandleForReading] readDataToEndOfFile];
-    NSString *stdoutString = [[NSString alloc] initWithData:stdoutData encoding:NSUTF8StringEncoding] ?: @"";
-    NSString *stderrString = [[NSString alloc] initWithData:stderrData encoding:NSUTF8StringEncoding] ?: @"";
-
-    if (task.terminationStatus != 0) {
-        NSString *message = stderrString.length > 0 ? stderrString : @"Preview generation failed.";
-        if (error) {
-            *error = MDVMakeError(12, [message stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet]);
-        }
-        return nil;
-    }
-
-    __block NSString *htmlPath = nil;
-    [stdoutString enumerateLinesUsingBlock:^(NSString *line, BOOL *stop) {
-        NSString *trimmed = [line stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
-        if (trimmed.length > 0) {
-            htmlPath = trimmed;
-            *stop = YES;
-        }
-    }];
-
-    if (htmlPath.length == 0) {
-        if (error) {
-            *error = MDVMakeError(13, @"Preview generation did not return an HTML path.");
-        }
-        return nil;
-    }
-
-    return [NSURL fileURLWithPath:htmlPath];
+    NSString *extension = fileURL.pathExtension.lowercaseString;
+    NSString *kind = [extension isEqualToString:@"json"] ? @"json" :
+        ([@[@"yaml", @"yml"] containsObject:extension] ? @"yaml" : @"markdown");
+    NSDictionary *payload = @{
+        @"filename": fileURL.lastPathComponent,
+        @"sourcePath": fileURL.path,
+        @"baseUrl": fileURL.URLByDeletingLastPathComponent.absoluteString,
+        @"assetUrl": [[NSBundle mainBundle].resourceURL URLByAppendingPathComponent:@"vendor" isDirectory:YES].absoluteString,
+        @"kind": kind, @"content": source,
+    };
+    NSData *data = [NSJSONSerialization dataWithJSONObject:payload options:0 error:error];
+    if (!data) return nil;
+    NSString *json = [[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding]
+        stringByReplacingOccurrencesOfString:@"<" withString:@"\\u003c"];
+    html = [html stringByReplacingOccurrencesOfString:@"__MDV_ASSETS__" withString:[NSBundle mainBundle].resourceURL.absoluteString];
+    html = [html stringByReplacingOccurrencesOfString:@"__MDV_PAYLOAD__" withString:json];
+    NSFileManager *manager = [NSFileManager defaultManager];
+    if (![manager createDirectoryAtURL:self.previewDirectoryURL withIntermediateDirectories:YES attributes:nil error:error]) return nil;
+    NSURL *url = [self.previewDirectoryURL URLByAppendingPathComponent:[NSUUID.UUID.UUIDString stringByAppendingString:@".html"]];
+    if (![html writeToURL:url atomically:YES encoding:NSUTF8StringEncoding error:error]) return nil;
+    *content = source;
+    return url;
 }
 
 - (void)loadErrorPageWithMessage:(NSString *)message {
@@ -213,32 +200,44 @@ static NSString *const MDVSaveMessageHandlerName = @"mdvSaveBridge";
     self.previewReady = NO;
 }
 
-- (BOOL)openMarkdownFileURL:(NSURL *)fileURL error:(NSError **)error {
-    NSURL *standardURL = fileURL.fileURL ? fileURL.URLByStandardizingPath : [NSURL fileURLWithPath:fileURL.path];
-    NSURL *previewURL = [self previewHTMLURLForFileURL:standardURL error:error];
-
-    if (!previewURL) {
-        [self loadErrorPageWithMessage:error && *error ? (*error).localizedDescription : nil];
-        return NO;
-    }
-
-    BOOL fileChanged = ![standardURL isEqual:self.sourceFileURL];
-
-    self.sourceFileURL = standardURL;
-    self.previewFileURL = previewURL;
+- (BOOL)openDocumentFileURL:(NSURL *)fileURL {
+    if (![self confirmDiscardChanges]) return NO;
+    NSURL *url = fileURL.URLByStandardizingPath;
+    BOOL fileChanged = ![url isEqual:self.sourceFileURL];
+    self.sourceFileURL = url;
     self.previewReady = NO;
+    NSURL *previousPreviewURL = self.previewFileURL;
+    self.previewFileURL = nil;
+    self.dirty = NO;
+    self.window.documentEdited = NO;
+    self.sourceChangeNotified = NO;
     self.lastExportedPDFURL = nil;
-
-    self.window.title = standardURL.lastPathComponent;
-    self.window.representedURL = standardURL;
-    [[NSDocumentController sharedDocumentController] noteNewRecentDocumentURL:standardURL];
-
-    [self.webView loadFileURL:previewURL allowingReadAccessToURL:[NSURL fileURLWithPath:@"/"]];
-
-    if (fileChanged || !self.fileWatchStream) {
-        [self startWatchingSourceFile];
-    }
-
+    self.window.title = url.lastPathComponent;
+    self.window.representedURL = url;
+    NSUInteger generation = ++self.loadGeneration;
+    [self.webView evaluateJavaScript:@"document.body.inert = true" completionHandler:nil];
+    if (fileChanged || !self.fileWatchStream) [self startWatchingSourceFile];
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        NSError *loadError = nil;
+        NSString *content = nil;
+        NSURL *previewURL = [self previewHTMLURLForFileURL:url content:&content error:&loadError];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (self.closed || generation != self.loadGeneration) {
+                if (previewURL) [[NSFileManager defaultManager] removeItemAtURL:previewURL error:nil];
+                if (self.closed) [[NSFileManager defaultManager] removeItemAtURL:self.previewDirectoryURL error:nil];
+                return;
+            }
+            if (!previewURL) {
+                [self loadErrorPageWithMessage:loadError.localizedDescription];
+                return;
+            }
+            if (previousPreviewURL) [[NSFileManager defaultManager] removeItemAtURL:previousPreviewURL error:nil];
+            self.sourceSnapshot = content;
+            self.previewFileURL = previewURL;
+            [[NSDocumentController sharedDocumentController] noteNewRecentDocumentURL:url];
+            [self.webView loadFileURL:previewURL allowingReadAccessToURL:[NSURL fileURLWithPath:@"/"]];
+        });
+    });
     return YES;
 }
 
@@ -248,10 +247,7 @@ static NSString *const MDVSaveMessageHandlerName = @"mdvSaveBridge";
     }
 
     if (!self.isPreviewReady) {
-        NSError *error = nil;
-        if (![self openMarkdownFileURL:self.sourceFileURL error:&error]) {
-            [self presentError:error];
-        }
+        [self openDocumentFileURL:self.sourceFileURL];
         return;
     }
 
@@ -291,11 +287,7 @@ static NSString *const MDVSaveMessageHandlerName = @"mdvSaveBridge";
             }
         }
 
-        NSError *error = nil;
-        if (![strongSelf openMarkdownFileURL:strongSelf.sourceFileURL error:&error]) {
-            [strongSelf clearPendingScrollRestore];
-            [strongSelf presentError:error];
-        }
+        if (![strongSelf openDocumentFileURL:strongSelf.sourceFileURL]) [strongSelf clearPendingScrollRestore];
     }];
 }
 
@@ -414,54 +406,69 @@ static NSString *const MDVSaveMessageHandlerName = @"mdvSaveBridge";
 }
 
 - (void)callJavaScriptSaveCallbackWithSuccess:(BOOL)success message:(NSString *)message {
-    NSString *escapedMessage = [[(message ?: @"")
-        stringByReplacingOccurrencesOfString:@"\\" withString:@"\\\\"]
-        stringByReplacingOccurrencesOfString:@"'" withString:@"\\'"];
-    escapedMessage = [escapedMessage stringByReplacingOccurrencesOfString:@"\n" withString:@"\\n"];
+    NSData *data = [NSJSONSerialization dataWithJSONObject:@[@(success), message ?: @""] options:0 error:nil];
+    NSString *arguments = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+    [self.webView evaluateJavaScript:[NSString stringWithFormat:@"window.mdvOnSaveResult?.(...%@)", arguments] completionHandler:nil];
+}
 
-    NSString *script = [NSString stringWithFormat:
-        @"if (typeof window.mdvOnSaveResult === 'function') { window.mdvOnSaveResult(%@, '%@'); }",
-        success ? @"true" : @"false", escapedMessage];
-
-    [self.webView evaluateJavaScript:script completionHandler:nil];
+- (void)finishSave:(NSString *)content error:(NSError *)error {
+    self.saving = NO;
+    if (!error) {
+        self.sourceSnapshot = content;
+        self.dirty = NO;
+        self.window.documentEdited = NO;
+        self.sourceChangeNotified = NO;
+    }
+    [self callJavaScriptSaveCallbackWithSuccess:!error message:error.localizedDescription ?: @"Saved"];
 }
 
 - (void)saveDocumentContent:(NSString *)content {
-    if (!self.sourceFileURL) {
-        [self callJavaScriptSaveCallbackWithSuccess:NO message:@"No source file is open."];
-        return;
-    }
-
-    NSError *writeError = nil;
-    BOOL wrote = [content writeToURL:self.sourceFileURL
-                           atomically:YES
-                             encoding:NSUTF8StringEncoding
-                                error:&writeError];
-
-    if (!wrote) {
-        NSString *message = writeError.localizedDescription ?: @"Could not save the file.";
-        [self callJavaScriptSaveCallbackWithSuccess:NO message:message];
-        return;
-    }
-
-    // The webView already reflects this content (see handleSaveResult in
-    // viewer.js). Mark the write as self-initiated so the FSEvents watcher
-    // below doesn't reload the whole page out from under an in-progress
-    // edit a moment later.
-    self.lastSelfSaveAt = [NSDate date];
-
-    [self callJavaScriptSaveCallbackWithSuccess:YES message:@"Saved"];
+    if (!self.sourceFileURL || self.saving) return;
+    self.saving = YES;
+    NSURL *url = self.sourceFileURL;
+    NSString *snapshot = self.sourceSnapshot;
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        NSString *diskContent = [NSString stringWithContentsOfURL:url encoding:NSUTF8StringEncoding error:nil];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (![diskContent isEqualToString:snapshot]) {
+                NSAlert *alert = [[NSAlert alloc] init];
+                alert.messageText = @"The file changed on disk.";
+                alert.informativeText = @"Replace it with your edits?";
+                [alert addButtonWithTitle:@"Cancel"];
+                [alert addButtonWithTitle:@"Replace"];
+                if ([alert runModal] != NSAlertSecondButtonReturn) {
+                    [self finishSave:nil error:MDVMakeError(22, @"Save canceled. Your edits are preserved.")];
+                    return;
+                }
+            }
+            dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+                NSError *error = nil;
+                [content writeToURL:url atomically:YES encoding:NSUTF8StringEncoding error:&error];
+                dispatch_async(dispatch_get_main_queue(), ^{ [self finishSave:content error:error]; });
+            });
+        });
+    });
 }
 
 - (void)userContentController:(WKUserContentController *)userContentController
        didReceiveScriptMessage:(WKScriptMessage *)message {
-    if (![message.name isEqualToString:MDVSaveMessageHandlerName]) {
+    if (![message.name isEqualToString:MDVSaveMessageHandlerName] || !message.frameInfo.isMainFrame ||
+        ![message.frameInfo.request.URL isEqual:self.previewFileURL]) {
         return;
     }
 
     NSDictionary *body = [message.body isKindOfClass:NSDictionary.class] ? (NSDictionary *)message.body : nil;
     NSString *action = body[@"action"];
     NSString *content = body[@"content"];
+    if ([action isEqualToString:@"dirty"]) {
+        self.dirty = [body[@"value"] boolValue];
+        self.window.documentEdited = self.dirty;
+        return;
+    }
+    if ([action isEqualToString:@"renderStarted"] || [action isEqualToString:@"renderReady"]) {
+        self.previewReady = [action isEqualToString:@"renderReady"];
+        return;
+    }
 
     if (![action isEqualToString:@"save"] || ![content isKindOfClass:NSString.class]) {
         [self callJavaScriptSaveCallbackWithSuccess:NO message:@"Invalid save request."];
@@ -487,11 +494,23 @@ static void MDVFSEventCallback(ConstFSEventStreamRef streamRef,
             continue;
         }
 
-        if (controller.lastSelfSaveAt && -[controller.lastSelfSaveAt timeIntervalSinceNow] < 1.5) {
+        if (controller.saving) return;
+        if (controller.dirty) {
+            if (!controller.sourceChangeNotified) {
+                controller.sourceChangeNotified = YES;
+                [controller.webView evaluateJavaScript:@"window.mdvSourceChanged && window.mdvSourceChanged()" completionHandler:nil];
+            }
             return;
         }
-
-        [controller reloadPreview:nil];
+        NSURL *url = controller.sourceFileURL;
+        NSUInteger generation = controller.loadGeneration;
+        dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+            NSString *content = [NSString stringWithContentsOfURL:url encoding:NSUTF8StringEncoding error:nil];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                if (!controller.closed && !controller.dirty && !controller.saving && generation == controller.loadGeneration &&
+                    [controller.sourceFileURL isEqual:url] && ![content isEqualToString:controller.sourceSnapshot]) [controller reloadPreview:nil];
+            });
+        });
         return;
     }
 }
@@ -535,16 +554,25 @@ static void MDVFSEventCallback(ConstFSEventStreamRef streamRef,
     }
 }
 
+- (BOOL)windowShouldClose:(NSWindow *)sender {
+    return [self confirmDiscardChanges];
+}
+
 - (void)windowWillClose:(NSNotification *)notification {
+    self.closed = YES;
+    self.loadGeneration++;
     [self stopWatchingSourceFile];
     [self clearPendingScrollRestore];
+    NSURL *directory = self.previewDirectoryURL;
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+        [[NSFileManager defaultManager] removeItemAtURL:directory error:nil];
+    });
     if (self.closeHandler) {
         self.closeHandler();
     }
 }
 
 - (void)webView:(WKWebView *)webView didFinishNavigation:(WKNavigation *)navigation {
-    self.previewReady = YES;
     NSString *editingScript = [NSString stringWithFormat:@"window.mdvSetClickToEditEnabled && window.mdvSetClickToEditEnabled(%@);",
         [[NSUserDefaults standardUserDefaults] boolForKey:MDVClickToEditKey] ? @"true" : @"false"];
     [webView evaluateJavaScript:editingScript completionHandler:nil];
@@ -599,10 +627,7 @@ static void MDVFSEventCallback(ConstFSEventStreamRef streamRef,
     }
 
     if (url.isFileURL && MDVURLLooksLikeSupportedDocument(url)) {
-        NSError *error = nil;
-        if (![self openMarkdownFileURL:url error:&error]) {
-            [self presentError:error];
-        }
+        [self openDocumentFileURL:url];
         return;
     }
 
@@ -827,6 +852,13 @@ decisionHandler:(void (^)(WKNavigationActionPolicy))decisionHandler {
     return item;
 }
 
+- (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication *)sender {
+    for (MDVPreviewWindowController *controller in self.windowControllers) {
+        if (![controller confirmDiscardChanges]) return NSTerminateCancel;
+    }
+    return NSTerminateNow;
+}
+
 - (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication *)sender {
     return NO;
 }
@@ -932,15 +964,6 @@ decisionHandler:(void (^)(WKNavigationActionPolicy))decisionHandler {
     return controller;
 }
 
-- (void)presentError:(NSError *)error {
-    if (!error) {
-        return;
-    }
-
-    NSAlert *alert = [NSAlert alertWithError:error];
-    [alert runModal];
-}
-
 - (void)openFileURLs:(NSArray<NSURL *> *)urls reuseCurrentWindow:(BOOL)reuseCurrentWindow {
     MDVPreviewWindowController *reusableController = reuseCurrentWindow ? [self currentPreviewWindowController] : nil;
 
@@ -955,16 +978,7 @@ decisionHandler:(void (^)(WKNavigationActionPolicy))decisionHandler {
         }
 
         MDVPreviewWindowController *controller = (index == 0 && reusableController) ? reusableController : [self newWindowController];
-        NSError *error = nil;
-
-        if (![controller openMarkdownFileURL:fileURL error:&error]) {
-            if (controller != reusableController) {
-                [self.windowControllers removeObject:controller];
-                [controller close];
-            }
-            [self presentError:error];
-            continue;
-        }
+        if (![controller openDocumentFileURL:fileURL]) continue;
 
         [controller showWindow:self];
         [controller.window makeKeyAndOrderFront:self];

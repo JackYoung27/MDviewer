@@ -18,8 +18,11 @@ jobs:
         with:
           ref: ${{ github.event.release.tag_name }}
 
-      - name: Build archive
-        run: ./build.sh archive
+      - name: Build and test
+        run: ./tests/run.sh
+
+      - name: Package archive
+        run: ditto -c -k --sequesterRsrc --keepParent "dist/Markdown Viewer.app" dist/Markdown-Viewer-macOS.zip
 
       - name: Upload release asset
         env:

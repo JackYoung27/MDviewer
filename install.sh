@@ -8,7 +8,6 @@ DIST_APP="$SCRIPT_DIR/dist/$APP_NAME"
 INSTALL_DIR="${INSTALL_DIR:-/Applications}"
 TARGET_APP="$INSTALL_DIR/$APP_NAME"
 LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
-LAUNCH_SERVICES_PLIST="$HOME/Library/Preferences/com.apple.LaunchServices/com.apple.launchservices.secure.plist"
 
 require_command() {
     if ! command -v "$1" >/dev/null 2>&1; then
@@ -36,15 +35,12 @@ main() {
     local bundle_id
     bundle_id="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$TARGET_APP/Contents/Info.plist")"
 
-    python3 - "$bundle_id" "$LAUNCH_SERVICES_PLIST" <<'PY'
+    python3 - "$bundle_id" <<'PY'
 import ctypes
-import os
-import plistlib
 import sys
 from contextlib import contextmanager
 
 bundle_id = sys.argv[1]
-plist_path = os.path.expanduser(sys.argv[2])
 
 EXTENSIONS = ["md", "markdown", "mdown", "mkd"]
 CONTENT_TYPES = {"net.daringfireball.markdown"}
@@ -112,46 +108,7 @@ with cfstr(bundle_id) as bundle_cf, cfstr("public.filename-extension") as tag_cl
                 raise RuntimeError(f"Handler mismatch for {ct}: expected {bundle_id}, got {current}")
 
             print(f"default handler set: {ct} -> {current}")
-
-
-# --- Update LaunchServices plist ---
-
-def is_markdown_handler(h):
-    if h.get("LSHandlerContentType") in CONTENT_TYPES:
-        return True
-    if (h.get("LSHandlerContentTagClass") == "public.filename-extension"
-            and h.get("LSHandlerContentTag") in EXTENSIONS):
-        return True
-    return False
-
-
-payload = {}
-if os.path.exists(plist_path):
-    with open(plist_path, "rb") as f:
-        payload = plistlib.load(f)
-
-version_pref = {"LSHandlerRoleAll": "-"}
-handlers = [h for h in payload.get("LSHandlers", []) if not is_markdown_handler(h)]
-
-for ct in sorted(CONTENT_TYPES):
-    handlers.append({"LSHandlerContentType": ct, "LSHandlerRoleAll": bundle_id,
-                      "LSHandlerPreferredVersions": version_pref})
-
-for ext in EXTENSIONS:
-    handlers.append({"LSHandlerContentTag": ext, "LSHandlerContentTagClass": "public.filename-extension",
-                      "LSHandlerRoleAll": bundle_id, "LSHandlerPreferredVersions": version_pref})
-
-payload["LSHandlers"] = handlers
-os.makedirs(os.path.dirname(plist_path), exist_ok=True)
-
-with open(plist_path, "wb") as f:
-    plistlib.dump(payload, f, fmt=plistlib.FMT_BINARY)
 PY
-
-    "$LSREGISTER" -kill -seed -r -domain local -domain system -domain user >/dev/null 2>&1 || true
-    "$LSREGISTER" -f "$TARGET_APP" >/dev/null
-
-    killall cfprefsd Finder >/dev/null 2>&1 || true
 
     echo "Installed -> $TARGET_APP"
 }

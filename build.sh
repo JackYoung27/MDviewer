@@ -241,7 +241,7 @@ build_bundle() {
     build_native_binary
     build_app_icon
     cp "$SRC_DIR/Info.plist" "$CONTENTS_DIR/Info.plist"
-    cp "$SRC_DIR/MarkdownViewer.sh" "$RESOURCES_DIR/MarkdownViewer.sh"
+    cp "$SRC_DIR/viewer.html" "$RESOURCES_DIR/viewer.html"
     cp "$SRC_DIR/viewer.css" "$RESOURCES_DIR/viewer.css"
     cp "$SRC_DIR/viewer.js" "$RESOURCES_DIR/viewer.js"
     cp "$SCRIPT_DIR/LICENSE" "$RESOURCES_DIR/LICENSE"
@@ -256,11 +256,12 @@ build_bundle() {
     extract_npm_file "katex" "$KATEX_VERSION" "package/dist/katex.min.js" "$VENDOR_DIR/katex.min.js" "$KATEX_JS_SHA256"
     extract_npm_file "katex" "$KATEX_VERSION" "package/dist/contrib/auto-render.min.js" "$VENDOR_DIR/katex-auto-render.min.js" "$KATEX_AUTO_RENDER_SHA256"
     extract_npm_dir "katex" "$KATEX_VERSION" "package/dist/fonts" "$VENDOR_DIR/fonts"
+    find "$VENDOR_DIR/fonts" -type f ! -name '*.woff2' -delete
+    sed -E 's/,url\([^)]*\) format\("(woff|truetype)"\)//g' "$VENDOR_DIR/katex.min.css" > "$VENDOR_DIR/katex.woff2.css"
+    mv "$VENDOR_DIR/katex.woff2.css" "$VENDOR_DIR/katex.min.css"
     extract_npm_file "katex" "$KATEX_VERSION" "package/LICENSE" "$LICENSES_DIR/katex-LICENSE"
 
-    chmod 755 "$RESOURCES_DIR/MarkdownViewer.sh"
     plutil -lint "$CONTENTS_DIR/Info.plist" >/dev/null
-    bash -n "$RESOURCES_DIR/MarkdownViewer.sh"
 
     if command -v codesign >/dev/null 2>&1; then
         if ! codesign --force --deep --sign - "$APP_DIR" >/dev/null 2>&1; then
