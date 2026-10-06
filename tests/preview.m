@@ -48,6 +48,7 @@ int main(void) {
     @autoreleasepool {
         [NSApplication sharedApplication];
         [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
+        [[NSUserDefaults standardUserDefaults] setBool:NO forKey:MDVClickToEditKey];
         method_setImplementation(class_getInstanceMethod(NSAlert.class, @selector(runModal)), (IMP)TestAlert);
         NSURL *directory = [[NSFileManager defaultManager].temporaryDirectory
             URLByAppendingPathComponent:NSUUID.UUID.UUIDString isDirectory:YES];
@@ -60,8 +61,11 @@ int main(void) {
         Check([JavaScript(controller, @"document.querySelector('.doc-plain').textContent") isEqual:original], @"Source text changed");
         Check([JavaScript(controller, @"document.querySelector('.doc-plain').contentEditable") isEqual:@"false"], @"Editing must default off");
         Check([JavaScript(controller, @"[...document.scripts].every(s => !/mermaid|katex|marked|purify/.test(s.src))") boolValue], @"JSON loaded Markdown assets");
+        MDVAppDelegate *delegate = [[MDVAppDelegate alloc] init];
+        [delegate.windowControllers addObject:controller];
+        [delegate toggleClickToEdit:nil];
 
-        JavaScript(controller, @"window.mdvSetClickToEditEnabled(true); const surface = document.querySelector('.doc-plain'); surface.textContent = '{\"value\":\"edited\"}'; surface.dispatchEvent(new Event('input')); mdvOpenFindBar(); document.querySelector('.find-panel__input').value = 'edited'; document.querySelector('.find-panel__input').dispatchEvent(new Event('input'));");
+        JavaScript(controller, @"const surface = document.querySelector('.doc-plain'); surface.textContent = '{\"value\":\"edited\"}'; surface.dispatchEvent(new Event('input')); mdvOpenFindBar(); document.querySelector('.find-panel__input').value = 'edited'; document.querySelector('.find-panel__input').dispatchEvent(new Event('input'));");
         Check(Wait(^BOOL { return controller.dirty; }), @"Dirty state missing");
         Check(Wait(^BOOL { return [JavaScript(controller, @"document.querySelectorAll('.find-match').length") integerValue] == 1; }), @"Search failed");
         JavaScript(controller, @"mdvCloseFindBar()");
@@ -72,7 +76,7 @@ int main(void) {
         Open(controller, json);
         Check(!controller.dirty, @"Discard left dirty state");
 
-        JavaScript(controller, @"window.mdvSetClickToEditEnabled(true); document.querySelector('.doc-plain').textContent = '{\"value\":\"saved\"}'; document.querySelector('.doc-plain').dispatchEvent(new Event('input'));");
+        JavaScript(controller, @"document.querySelector('.doc-plain').textContent = '{\"value\":\"saved\"}'; document.querySelector('.doc-plain').dispatchEvent(new Event('input'));");
         Check(Wait(^BOOL { return controller.dirty; }), @"Dirty state missing before save");
         [@"{\"value\":\"external\"}" writeToURL:json atomically:YES encoding:NSUTF8StringEncoding error:nil];
         alertResponse = NSAlertFirstButtonReturn;
@@ -90,7 +94,7 @@ int main(void) {
         Open(controller, markdown);
         Check([JavaScript(controller, @"document.querySelector('h1').textContent") isEqual:@"Read"], @"Markdown failed");
         Check([JavaScript(controller, @"!window.mermaid && !window.katex") boolValue], @"Plain Markdown loaded optional assets");
-        JavaScript(controller, @"window.mdvSetClickToEditEnabled(true); document.querySelector('h1').click(); document.querySelector('textarea').value += 'edit'; document.querySelector('textarea').dispatchEvent(new Event('input'))");
+        JavaScript(controller, @"document.querySelector('h1').click(); document.querySelector('textarea').value += 'edit'; document.querySelector('textarea').dispatchEvent(new Event('input'))");
         Check(Wait(^BOOL { return controller.dirty; }), @"Markdown edits not tracked");
         JavaScript(controller, @"document.querySelector('textarea').dispatchEvent(new KeyboardEvent('keydown', {key:'Escape', bubbles:true}))");
         Check(Wait(^BOOL { return !controller.dirty && controller.isPreviewReady; }), @"Markdown discard failed");
@@ -104,7 +108,7 @@ int main(void) {
         NSString *yamlSource = @"name: 雪\nvalue: hello\n";
         [yamlSource writeToURL:yaml atomically:YES encoding:NSUTF8StringEncoding error:nil];
         Open(controller, yaml);
-        JavaScript(controller, @"window.mdvSetClickToEditEnabled(true); const surface = document.querySelector('.doc-plain'); surface.dispatchEvent(new InputEvent('beforeinput')); surface.textContent += 'added: true\\n'; surface.dispatchEvent(new Event('input')); surface.dispatchEvent(new KeyboardEvent('keydown', {key:'z', metaKey:true, bubbles:true}))");
+        JavaScript(controller, @"const surface = document.querySelector('.doc-plain'); surface.dispatchEvent(new InputEvent('beforeinput')); surface.textContent += 'added: true\\n'; surface.dispatchEvent(new Event('input')); surface.dispatchEvent(new KeyboardEvent('keydown', {key:'z', metaKey:true, bubbles:true}))");
         Check([JavaScript(controller, @"document.querySelector('.doc-plain').textContent") isEqual:yamlSource], @"Undo changed YAML source");
         Check(Wait(^BOOL { return !controller.dirty; }), @"Undo failed to clear dirty state");
         JavaScript(controller, @"document.querySelector('.doc-plain').dispatchEvent(new KeyboardEvent('keydown', {key:'z', metaKey:true, shiftKey:true, bubbles:true}))");
@@ -112,8 +116,6 @@ int main(void) {
         Check([redo hasSuffix:@"added: true\n"], [@"Redo failed: " stringByAppendingString:redo]);
         Check(Wait(^BOOL { return controller.dirty; }), @"Redo failed to restore dirty state");
         alertResponse = NSAlertFirstButtonReturn;
-        MDVAppDelegate *delegate = [[MDVAppDelegate alloc] init];
-        [delegate.windowControllers addObject:controller];
         Check([delegate applicationShouldTerminate:NSApp] == NSTerminateCancel, @"Quit discarded edits");
         alertResponse = NSAlertSecondButtonReturn;
         Open(controller, yaml);
@@ -122,7 +124,7 @@ int main(void) {
         NSString *largeJSON = [NSString stringWithFormat:@"\"%@\"", largeSource];
         [largeJSON writeToURL:json atomically:YES encoding:NSUTF8StringEncoding error:nil];
         Open(controller, json);
-        JavaScript(controller, @"window.mdvSetClickToEditEnabled(true); const surface = document.querySelector('.doc-plain'); surface.dispatchEvent(new InputEvent('beforeinput')); surface.textContent += ' '; surface.dispatchEvent(new Event('input')); surface.dispatchEvent(new KeyboardEvent('keydown', {key:'z', metaKey:true, bubbles:true}))");
+        JavaScript(controller, @"const surface = document.querySelector('.doc-plain'); surface.dispatchEvent(new InputEvent('beforeinput')); surface.textContent += ' '; surface.dispatchEvent(new Event('input')); surface.dispatchEvent(new KeyboardEvent('keydown', {key:'z', metaKey:true, bubbles:true}))");
         Check([JavaScript(controller, @"document.querySelector('.doc-plain').textContent") isEqual:largeJSON], @"Large-document undo failed");
         Check(Wait(^BOOL { return !controller.dirty; }), @"Large-document undo left dirty state");
 

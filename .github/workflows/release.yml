@@ -1,6 +1,9 @@
 name: Release
 
 on:
+  push:
+    branches: [main]
+  pull_request:
   release:
     types:
       - published
@@ -16,15 +19,17 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.release.tag_name }}
+          ref: ${{ github.event.release.tag_name || github.sha }}
 
       - name: Build and test
         run: ./tests/run.sh
 
       - name: Package archive
+        if: github.event_name == 'release'
         run: ditto -c -k --sequesterRsrc --keepParent "dist/Markdown Viewer.app" dist/Markdown-Viewer-macOS.zip
 
       - name: Upload release asset
+        if: github.event_name == 'release'
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release upload "${{ github.event.release.tag_name }}" dist/Markdown-Viewer-macOS.zip --clobber
