@@ -47,11 +47,13 @@ MDviewer is different:
 - **Secure** — HTML sanitized with [DOMPurify](https://github.com/cure53/DOMPurify), strict Content Security Policy
 - **Finder integration** — registers as default `.md` handler; opens `.json`/`.yaml`/`.yml` from Open With
 - **JSON & YAML viewing** — syntax-colored, alongside Markdown
-- **Edit in place** — click into JSON/YAML to edit directly in the colored view (Markdown edits via a raw-source view); `Cmd+S` saves straight back to the file, `Esc` discards, `Cmd+Z` undoes
+- **Optional editing** — off by default. Enable **Markdown Viewer → Settings → Click to Edit** in the macOS menu bar. Edit JSON/YAML in the colored view or Markdown in a source view. `Cmd+S` saves, `Esc` discards, and `Cmd+Z` undoes.
 - **Tabbed windows** — multiple documents in one window
 - **Local-first** — no network calls, no telemetry, no accounts
 
 ## Install
+
+Requires **macOS 15.0 (Sequoia) or later**. The download supports Apple Silicon and Intel Macs.
 
 ### Download
 
@@ -72,6 +74,14 @@ cd mdviewer
 ```
 
 Requires Xcode Command Line Tools (`xcode-select --install`).
+
+## Settings
+
+To enable editing, select **Markdown Viewer → Settings → Click to Edit** in the macOS menu bar. A checkmark means editing is on. Select it again to turn editing off.
+
+Editing is off by default, so you can select and copy text without entering edit mode. The setting applies to all open documents and is saved across app restarts. It controls Markdown, JSON, and YAML editing.
+
+Turning editing off preserves unsaved text. An open Markdown editor stays open until you save or discard it. For JSON/YAML, turn editing on again to continue an unfinished edit.
 
 ## Keyboard Shortcuts
 

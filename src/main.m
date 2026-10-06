@@ -26,6 +26,8 @@ static NSError *MDVMakeError(NSInteger code, NSString *description) {
                            userInfo:@{NSLocalizedDescriptionKey: description ?: @"Unknown error."}];
 }
 
+static NSString *const MDVClickToEditKey = @"MDVClickToEditEnabled";
+
 static NSString *const MDVSaveMessageHandlerName = @"mdvSaveBridge";
 
 /// Forwards WKScriptMessages to its owner without the strong reference
@@ -100,6 +102,10 @@ static NSString *const MDVSaveMessageHandlerName = @"mdvSaveBridge";
     [window center];
 
     WKWebViewConfiguration *configuration = [[WKWebViewConfiguration alloc] init];
+    NSString *editingScript = [NSString stringWithFormat:@"window.mdvClickToEditEnabled = %@;",
+        [[NSUserDefaults standardUserDefaults] boolForKey:MDVClickToEditKey] ? @"true" : @"false"];
+    [configuration.userContentController addUserScript:[[WKUserScript alloc]
+        initWithSource:editingScript injectionTime:WKUserScriptInjectionTimeAtDocumentStart forMainFrameOnly:YES]];
     MDVWeakScriptMessageProxy *messageProxy = [[MDVWeakScriptMessageProxy alloc] initWithTarget:self];
     [configuration.userContentController addScriptMessageHandler:messageProxy name:MDVSaveMessageHandlerName];
     self.webView = [[WKWebView alloc] initWithFrame:window.contentView.bounds configuration:configuration];
@@ -539,6 +545,9 @@ static void MDVFSEventCallback(ConstFSEventStreamRef streamRef,
 
 - (void)webView:(WKWebView *)webView didFinishNavigation:(WKNavigation *)navigation {
     self.previewReady = YES;
+    NSString *editingScript = [NSString stringWithFormat:@"window.mdvSetClickToEditEnabled && window.mdvSetClickToEditEnabled(%@);",
+        [[NSUserDefaults standardUserDefaults] boolForKey:MDVClickToEditKey] ? @"true" : @"false"];
+    [webView evaluateJavaScript:editingScript completionHandler:nil];
 
     if (!self.hasPendingScrollRestore) {
         return;
@@ -661,6 +670,16 @@ decisionHandler:(void (^)(WKNavigationActionPolicy))decisionHandler {
                                                 keyEquivalent:@""];
     aboutItem.target = NSApp;
     [appMenu addItem:aboutItem];
+    [appMenu addItem:[NSMenuItem separatorItem]];
+
+    NSMenuItem *settingsItem = [[NSMenuItem alloc] initWithTitle:@"Settings" action:nil keyEquivalent:@""];
+    NSMenu *settingsMenu = [[NSMenu alloc] initWithTitle:@"Settings"];
+    [settingsMenu addItem:[self menuItemWithTitle:@"Click to Edit"
+                                          action:@selector(toggleClickToEdit:)
+                                   keyEquivalent:@""
+                                    modifierMask:0]];
+    settingsItem.submenu = settingsMenu;
+    [appMenu addItem:settingsItem];
     [appMenu addItem:[NSMenuItem separatorItem]];
 
     NSMenuItem *hideItem = [[NSMenuItem alloc] initWithTitle:[NSString stringWithFormat:@"Hide %@", appName]
@@ -1026,8 +1045,31 @@ decisionHandler:(void (^)(WKNavigationActionPolicy))decisionHandler {
     [self runPreviewJavaScript:@"if (typeof mdvFindPreviousMatch === 'function') { mdvFindPreviousMatch(); }"];
 }
 
+- (void)toggleClickToEdit:(id)sender {
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    BOOL enabled = ![defaults boolForKey:MDVClickToEditKey];
+    [defaults setBool:enabled forKey:MDVClickToEditKey];
+    NSString *script = [NSString stringWithFormat:@"window.mdvSetClickToEditEnabled && window.mdvSetClickToEditEnabled(%@);", enabled ? @"true" : @"false"];
+    for (MDVPreviewWindowController *controller in self.windowControllers) {
+        // Keep the initial value current for reloads and linked documents, too.
+        WKUserContentController *contentController = controller.webView.configuration.userContentController;
+        [contentController removeAllUserScripts];
+        [contentController addUserScript:[[WKUserScript alloc]
+            initWithSource:[NSString stringWithFormat:@"window.mdvClickToEditEnabled = %@;", enabled ? @"true" : @"false"]
+            injectionTime:WKUserScriptInjectionTimeAtDocumentStart forMainFrameOnly:YES]];
+        [controller.webView evaluateJavaScript:script completionHandler:nil];
+    }
+}
+
 - (BOOL)validateUserInterfaceItem:(id<NSValidatedUserInterfaceItem>)item {
     SEL action = item.action;
+
+    if (action == @selector(toggleClickToEdit:)) {
+        if ([(id)item isKindOfClass:NSMenuItem.class]) {
+            [(NSMenuItem *)item setState:[[NSUserDefaults standardUserDefaults] boolForKey:MDVClickToEditKey] ? NSControlStateValueOn : NSControlStateValueOff];
+        }
+        return YES;
+    }
 
     if (action == @selector(openDocument:)) {
         return YES;

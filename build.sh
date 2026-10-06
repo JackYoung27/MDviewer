@@ -111,6 +111,7 @@ extract_npm_dir() {
 }
 
 SDK_PATH=""
+MINIMUM_MACOS_VERSION=""
 
 prepare_environment() {
     require_command bash
@@ -125,12 +126,17 @@ prepare_environment() {
     require_command tar
 
     SDK_PATH="$(xcrun --show-sdk-path)"
+    # Use the app's minimum OS version even when the build host runs a newer OS.
+    MINIMUM_MACOS_VERSION="$(plutil -extract LSMinimumSystemVersion raw -o - "$SRC_DIR/Info.plist")"
     mkdir -p "$DIST_DIR"
 }
 
 build_native_binary() {
     clang \
         -fobjc-arc \
+        -arch arm64 \
+        -arch x86_64 \
+        -mmacosx-version-min="$MINIMUM_MACOS_VERSION" \
         -Wall \
         -Wextra \
         -Wno-unused-parameter \
@@ -179,7 +185,7 @@ int main(int argc, const char *argv[]) {
 }
 OBJC
 
-    clang -fobjc-arc -isysroot "$SDK_PATH" -framework AppKit \
+    clang -fobjc-arc -mmacosx-version-min="$MINIMUM_MACOS_VERSION" -isysroot "$SDK_PATH" -framework AppKit \
         "$helper_src" -o "$helper_bin"
     "$helper_bin" "$svg_path" "$png_path" "$size"
     rm -f "$helper_src" "$helper_bin"

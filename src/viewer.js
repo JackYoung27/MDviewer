@@ -823,6 +823,20 @@
     pendingValue: null,
   };
 
+  let clickToEditEnabled = window.mdvClickToEditEnabled === true;
+
+  window.mdvSetClickToEditEnabled = (enabled) => {
+    clickToEditEnabled = enabled === true;
+    const surface = contentEl.querySelector(".doc-plain");
+    if (surface) {
+      surface.contentEditable = String(clickToEditEnabled);
+      surface.setAttribute("aria-label", clickToEditEnabled
+        ? "Edit document — Esc to discard, ⌘S to save, ⌘Z to undo"
+        : "Document text");
+    }
+    // Leave an open Markdown editor intact so its unsaved text is preserved.
+  };
+
   let toastEl = null;
   let toastHideTimer = 0;
 
@@ -898,7 +912,7 @@
   }
 
   function handleContentClick(event) {
-    if (editState.active) return;
+    if (!clickToEditEnabled || editState.active) return;
     if (event.target.closest("a, button")) return;
     if (window.getSelection().toString().length > 0) return;
 
@@ -983,9 +997,11 @@
     const surface = contentEl.querySelector(".doc-plain");
     if (!surface) return;
 
-    surface.contentEditable = "true";
+    surface.contentEditable = String(clickToEditEnabled);
     surface.spellcheck = false;
-    surface.setAttribute("aria-label", "Edit document — Esc to discard, ⌘S to save, ⌘Z to undo");
+    surface.setAttribute("aria-label", clickToEditEnabled
+      ? "Edit document — Esc to discard, ⌘S to save, ⌘Z to undo"
+      : "Document text");
 
     const history = createEditHistory(surface);
 
@@ -993,6 +1009,8 @@
 
     surface.addEventListener("keydown", (event) => {
       const meta = event.metaKey || event.ctrlKey;
+      // Allow saving text entered before editing was disabled.
+      if (!clickToEditEnabled && !(meta && event.key.toLowerCase() === "s")) return;
 
       if (event.key === "Escape") {
         event.preventDefault();
@@ -1016,6 +1034,7 @@
     });
 
     surface.addEventListener("paste", (event) => {
+      if (!clickToEditEnabled) return;
       event.preventDefault();
       history.recordBeforeChange();
       const text = (event.clipboardData || window.clipboardData).getData("text/plain");
